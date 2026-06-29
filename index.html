@@ -7,8 +7,8 @@
   <title>АрендаСтрой · Инструмент</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="theme.css?v=5">
-  <link rel="stylesheet" href="app.css?v=5">
+  <link rel="stylesheet" href="theme.css?v=6">
+  <link rel="stylesheet" href="app.css?v=6">
 </head>
 <body>
   <!-- Шапка -->
@@ -43,14 +43,20 @@
   <div class="toast-wrap" id="toastWrap"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=5"></script>
+  <script src="config.js?v=6"></script>
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/html5-qrcode.min.js"></script>
-  <script src="catalog-data.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="catalog-data.js?v=6"></script>
+  <script src="app.js?v=6"></script>
   <script>
-    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    // Убираем любой ранее установленный service worker и его кэш — чтобы устройства
+    // всегда получали свежую версию (раньше из-за кэша подгружалась старая).
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+    }
+    if (window.caches) {
+      caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {});
     }
   </script>
 </body>
