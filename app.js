@@ -612,28 +612,26 @@
     }
   }
 
-  // Набор стабильных ID текущего каталога.
-  function seedIds() { return new Set((window.SEED_CATALOG || []).map(d => d.id)); }
-
-  // Можно безопасно перелить каталог, если в базе только нетронутые позиции
-  // (старое демо ИЛИ позиции каталога без аренд/ТО и без проставленных инв. номеров).
-  function isUntouchedCatalog() {
-    const tools = store.tools();
-    if (!tools.length) return false;
-    const names = new Set((window.SEED_CATALOG || []).map(d => d.name));
-    return tools.every(t => {
-      const touched = (t.rentals || []).length || (t.maintenance || []).length
-        || t.inventoryNo || t.serialNo || t.notes;
-      const fromCatalog = OLD_DEMO_NAMES.includes(t.name) || names.has(t.name);
-      return fromCatalog && !touched;
+  // Переводим существующие позиции каталога на стабильные ID — БЕЗ потери истории
+  // (id — это просто ключ; аренды и ТО лежат внутри объекта инструмента).
+  function migrateIdsToStable() {
+    const byName = new Map((window.SEED_CATALOG || []).map(d => [d.name, d.id]));
+    const used = new Set(store.tools().map(t => t.id));
+    let changed = false;
+    store.tools().forEach(t => {
+      const sid = byName.get(t.name);
+      if (sid && t.id !== sid && !used.has(sid)) {
+        used.delete(t.id); t.id = sid; used.add(sid); changed = true;
+      }
     });
+    return changed;
   }
 
   function ensureCatalog() {
-    if (store.data.seeded === SEED_VERSION) return;        // уже на актуальной версии
-    if (store.tools().length === 0 || isUntouchedCatalog()) {
-      store.data.tools = [];                               // чистим старые нетронутые данные
-      seedFromCatalog();                                   // заливаем каталог со стабильными ID
+    if (store.tools().length === 0) {
+      seedFromCatalog();                 // первый запуск — заливаем каталог со стабильными ID
+    } else {
+      migrateIdsToStable();              // существующая база — переводим позиции на стабильные ID
     }
     store.data.seeded = SEED_VERSION;
     store.save();

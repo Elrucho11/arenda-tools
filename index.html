@@ -7,8 +7,8 @@
   <title>АрендаСтрой · Инструмент</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="theme.css">
-  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="theme.css?v=3">
+  <link rel="stylesheet" href="app.css?v=3">
 </head>
 <body>
   <!-- Шапка -->
@@ -43,8 +43,8 @@
 
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/html5-qrcode.min.js"></script>
-  <script src="catalog-data.js"></script>
-  <script src="app.js"></script>
+  <script src="catalog-data.js?v=3"></script>
+  <script src="app.js?v=3"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
       window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

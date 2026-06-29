@@ -1,7 +1,8 @@
 /* Service worker — офлайн-кэш приложения (сеть → кэш) */
-const CACHE = 'arenda-tools-v2';
+const CACHE = 'arenda-tools-v3';
 const ASSETS = [
-  './', './index.html', './app.css', './app.js', './theme.css',
+  './', './index.html',
+  './app.css?v=3', './app.js?v=3', './theme.css?v=3', './catalog-data.js?v=3',
   './manifest.webmanifest',
   './vendor/qrcode.min.js', './vendor/html5-qrcode.min.js',
   './icons/icon-192.png', './icons/icon-512.png',
