@@ -591,7 +591,8 @@
   //  ИМПОРТ КАТАЛОГА (при первом запуске)
   //  Источник — catalog-data.js (раздел инструмента из arenda-site).
   // =========================================================
-  const SEED_VERSION = 'catalog-v1';
+  // v2: стабильные ID из каталога (одинаковые на всех устройствах → QR работает между ними).
+  const SEED_VERSION = 'catalog-v2';
   const OLD_DEMO_NAMES = ['Перфоратор Bosch GBH 2-26', 'Бетономешалка 160 л', 'УШМ Makita 125 мм'];
 
   function seedFromCatalog() {
@@ -601,7 +602,7 @@
     for (let i = seed.length - 1; i >= 0; i--) {
       const d = seed[i];
       store.add({
-        id: uid(), status: 'available', createdAt: nowISO(),
+        id: d.id || uid(), status: 'available', createdAt: nowISO(),
         name: d.name, category: d.category || 'Прочее',
         inventoryNo: '', serialNo: '',
         dailyPrice: d.price || '', priceText: d.priceText || '',
@@ -611,19 +612,28 @@
     }
   }
 
-  // Нетронутые демо-данные старой версии — можно безопасно заменить каталогом.
-  function isUntouchedOldDemo() {
+  // Набор стабильных ID текущего каталога.
+  function seedIds() { return new Set((window.SEED_CATALOG || []).map(d => d.id)); }
+
+  // Можно безопасно перелить каталог, если в базе только нетронутые позиции
+  // (старое демо ИЛИ позиции каталога без аренд/ТО и без проставленных инв. номеров).
+  function isUntouchedCatalog() {
     const tools = store.tools();
     if (!tools.length) return false;
-    return tools.every(t =>
-      OLD_DEMO_NAMES.includes(t.name) && !(t.rentals || []).length && !(t.maintenance || []).length);
+    const names = new Set((window.SEED_CATALOG || []).map(d => d.name));
+    return tools.every(t => {
+      const touched = (t.rentals || []).length || (t.maintenance || []).length
+        || t.inventoryNo || t.serialNo || t.notes;
+      const fromCatalog = OLD_DEMO_NAMES.includes(t.name) || names.has(t.name);
+      return fromCatalog && !touched;
+    });
   }
 
   function ensureCatalog() {
-    if (store.data.seeded === SEED_VERSION) return;        // уже мигрировано
-    if (store.tools().length === 0 || isUntouchedOldDemo()) {
-      store.data.tools = [];                               // чистим старые демо
-      seedFromCatalog();                                   // заливаем реальный каталог
+    if (store.data.seeded === SEED_VERSION) return;        // уже на актуальной версии
+    if (store.tools().length === 0 || isUntouchedCatalog()) {
+      store.data.tools = [];                               // чистим старые нетронутые данные
+      seedFromCatalog();                                   // заливаем каталог со стабильными ID
     }
     store.data.seeded = SEED_VERSION;
     store.save();
