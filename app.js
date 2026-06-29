@@ -54,6 +54,7 @@
 
   // ---------- Облачная синхронизация (Supabase) ----------
   let pending = 0;   // счётчик незавершённых отправок в облако (для безопасного поллинга)
+  let lastSig = '';  // «подпись» состава базы (id+время) — чтобы не качать фото зря
   const sync = {
     client: null, enabled: false,
     async init() {
@@ -125,7 +126,7 @@
   const uid = () => 'T' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
   const rid = () => Math.random().toString(36).slice(2, 9);
   const nowISO = () => new Date().toISOString();
-  const todayInput = () => new Date().toISOString().slice(0, 10);
+  const todayInput = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
   function fmtDate(iso) {
     if (!iso) return '—';
@@ -142,6 +143,46 @@
     if (t.dailyPrice) return esc(t.dailyPrice) + ' ₽/сут';
     if (t.priceText) return esc(t.priceText);
     return '—';
+  }
+
+  // ---------- Просрочка ----------
+  // Местная дата (а не UTC) — иначе срок сравнивается криво около полуночи.
+  function todayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function isOverdue(t) {
+    if (t.status !== 'rented') return false;
+    const cur = currentRental(t);
+    return !!(cur && cur.dueAt && cur.dueAt < todayStr());
+  }
+  function daysOverdue(t) {
+    const cur = currentRental(t);
+    if (!cur || !cur.dueAt || cur.dueAt >= todayStr()) return 0;
+    const d1 = new Date(cur.dueAt + 'T00:00:00');
+    const d2 = new Date(todayStr() + 'T00:00:00');
+    return Math.round((d2 - d1) / 86400000);
+  }
+
+  // ---------- Сжатие фото (клиентский ресайз перед сохранением) ----------
+  function resizeImage(file, maxSize = 900, quality = 0.7) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > maxSize) { height = Math.round(height * maxSize / width); width = maxSize; }
+        else if (height > maxSize) { width = Math.round(width * maxSize / height); height = maxSize; }
+        const c = document.createElement('canvas');
+        c.width = width; c.height = height;
+        c.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(c.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      const fr = new FileReader();
+      fr.onload = () => { img.src = fr.result; };
+      fr.onerror = reject;
+      fr.readAsDataURL(file);
+    });
   }
 
   function toast(msg, type = 'ok') {
@@ -174,6 +215,8 @@
     const view = $('#view');
     if (hash.startsWith('#/t/')) {
       renderTool(view, hash.slice(4));
+    } else if (hash === '#/stats') {
+      renderStats(view);
     } else {
       renderCatalog(view);
     }
@@ -188,8 +231,14 @@
   async function pollSync() {
     if (!sync.enabled || pending > 0) return;
     try {
-      const remote = await sync.pullAll();
+      // Лёгкая проверка: тянем только id+updated_at (без doc/фото)
+      const { data, error } = await sync.client.from('tools').select('id,updated_at').order('id');
+      if (error) throw error;
       setStatus('online');
+      const sig = data.map(r => r.id + ':' + r.updated_at).join('|');
+      if (sig === lastSig) return;                 // ничего не изменилось — полную базу не качаем
+      const remote = await sync.pullAll();         // что-то поменялось — подтягиваем целиком
+      lastSig = sig;
       if (JSON.stringify(store.data.tools) !== JSON.stringify(remote)) {
         store.data.tools = remote; store.save(); render(false);
       }
@@ -215,6 +264,7 @@
 
   function renderCatalog(view) {
     const tools = store.tools();
+    const overdue = tools.filter(isOverdue).length;
     const counts = {
       total: tools.length,
       available: tools.filter(t => t.status === 'available').length,
@@ -228,13 +278,19 @@
           <span class="eyebrow">Парк инструмента</span>
           <h1>Каталог <span>инструмента</span></h1>
         </div>
-        <button class="btn btn--primary" id="addTool">+ Добавить инструмент</button>
+        <div class="head-actions">
+          <a class="btn btn--outline" href="#/stats">📊 Аналитика</a>
+          <button class="btn btn--outline" id="printLabels">🏷 Наклейки</button>
+          <button class="btn btn--outline" id="bulkInv">№ Инв. номера</button>
+          <button class="btn btn--primary" id="addTool">+ Добавить</button>
+        </div>
       </div>
 
       <div class="stats">
         <div class="stat"><div class="stat__num">${counts.total}</div><div class="stat__label">Всего позиций</div></div>
         <div class="stat stat--ok"><div class="stat__num">${counts.available}</div><div class="stat__label">В наличии</div></div>
         <div class="stat stat--rented"><div class="stat__num">${counts.rented}</div><div class="stat__label">В аренде</div></div>
+        <div class="stat ${overdue ? 'stat--over' : ''}"><div class="stat__num">${overdue}</div><div class="stat__label">Просрочено</div></div>
         <div class="stat stat--maint"><div class="stat__num">${counts.maintenance}</div><div class="stat__label">ТО / ремонт</div></div>
       </div>
 
@@ -242,8 +298,8 @@
         <input type="search" class="search" id="search" placeholder="🔍 Поиск по названию, № или категории…" value="${esc(filterState.q)}">
       </div>
       <div class="filters" id="filters">
-        ${['all','available','rented','maintenance','broken'].map(s => {
-          const label = s === 'all' ? 'Все' : STATUS[s].label;
+        ${['all','available','rented','overdue','maintenance','broken'].map(s => {
+          const label = s === 'all' ? 'Все' : (s === 'overdue' ? '⏰ Просрочено' : STATUS[s].label);
           return `<button class="chip ${filterState.status === s ? 'is-active' : ''}" data-status="${s}">${label}</button>`;
         }).join('')}
       </div>
@@ -252,6 +308,8 @@
     `;
 
     $('#addTool').addEventListener('click', () => openToolForm());
+    $('#printLabels').addEventListener('click', () => printLabels(visibleTools()));
+    $('#bulkInv').addEventListener('click', () => openBulkInvForm());
     $('#search').addEventListener('input', (e) => { filterState.q = e.target.value; renderGrid(); });
     $('#filters').addEventListener('click', (e) => {
       const btn = e.target.closest('[data-status]'); if (!btn) return;
@@ -263,13 +321,20 @@
     renderGrid();
   }
 
-  function renderGrid() {
-    const grid = $('#grid'); if (!grid) return;
+  // Текущая выборка каталога с учётом поиска и фильтра (используется и в печати наклеек)
+  function visibleTools() {
     const q = filterState.q.trim().toLowerCase();
     let list = store.tools();
-    if (filterState.status !== 'all') list = list.filter(t => t.status === filterState.status);
+    if (filterState.status === 'overdue') list = list.filter(isOverdue);
+    else if (filterState.status !== 'all') list = list.filter(t => t.status === filterState.status);
     if (q) list = list.filter(t =>
       [t.name, t.category, t.inventoryNo, t.serialNo].filter(Boolean).join(' ').toLowerCase().includes(q));
+    return list;
+  }
+
+  function renderGrid() {
+    const grid = $('#grid'); if (!grid) return;
+    const list = visibleTools();
 
     if (!store.tools().length) {
       grid.innerHTML = `<div class="empty"><div class="empty__icon">🧰</div>
@@ -283,8 +348,10 @@
     grid.innerHTML = list.map(t => {
       const st = STATUS[t.status] || STATUS.available;
       const cur = t.status === 'rented' ? currentRental(t) : null;
+      const over = isOverdue(t);
       return `
-        <article class="tool-card" data-id="${t.id}">
+        <article class="tool-card ${over ? 'tool-card--over' : ''}" data-id="${t.id}">
+          ${t.photo ? `<div class="tool-card__photo" style="background-image:url('${t.photo}')"></div>` : ''}
           <div class="tool-card__top">
             <div>
               <div class="tool-card__name">${esc(t.name)}</div>
@@ -292,7 +359,7 @@
             </div>
             <span class="status status--${st.cls}">${st.label}</span>
           </div>
-          ${cur ? `<div class="tool-card__renter">👤 ${esc(cur.renter)} · до ${fmtDate(cur.dueAt)}</div>` : ''}
+          ${cur ? `<div class="tool-card__renter ${over ? 'is-over' : ''}">👤 ${esc(cur.renter)} · ${over ? `⏰ просрочка ${daysOverdue(t)} дн.` : 'до ' + fmtDate(cur.dueAt)}</div>` : ''}
           <div class="tool-card__meta">
             ${t.inventoryNo ? `<span>№ ${esc(t.inventoryNo)}</span>` : ''}
             ${(t.dailyPrice || t.priceText) ? `<span>${priceLabel(t)}</span>` : ''}
@@ -334,6 +401,18 @@
 
       <div class="detail">
         <div>
+          <div class="panel photo-box">
+            <h3>Фото</h3>
+            ${t.photo
+              ? `<img class="photo-box__img" src="${t.photo}" alt="">`
+              : `<div class="photo-box__empty">📷 Нет фото</div>`}
+            <input type="file" id="photoInput" accept="image/*" hidden>
+            <div class="actions-row" style="justify-content:center">
+              <button class="btn btn--outline btn--sm" id="photoBtn">${t.photo ? '🔄 Заменить' : '📷 Добавить фото'}</button>
+              ${t.photo ? `<button class="btn btn--outline btn--sm" id="photoDel" style="color:#dc2626;border-color:#f3c2c2">✕ Убрать</button>` : ''}
+            </div>
+          </div>
+
           <div class="panel qr-box">
             <h3 style="align-self:flex-start">QR-код</h3>
             <div class="qr-box__code" id="qrcode"></div>
@@ -358,6 +437,7 @@
               <button class="btn btn--outline" id="actMaint">🔧 Записать ТО</button>
               <button class="btn btn--outline" id="actStatus">⚙ Статус</button>
               <button class="btn btn--outline" id="actEdit">✏ Изменить</button>
+              <button class="btn btn--outline" id="actCopies">📑 Создать копии</button>
             </div>
           </div>
 
@@ -378,14 +458,15 @@
           </div>
 
           ${cur ? `
-          <div class="panel" style="border-color:var(--orange)">
+          <div class="panel" style="border-color:${isOverdue(t) ? '#dc2626' : 'var(--orange)'}">
             <h3>🔴 Сейчас в аренде</h3>
+            ${isOverdue(t) ? `<div class="overdue-banner">⏰ Просрочено на ${daysOverdue(t)} дн. — пора вернуть!</div>` : ''}
             <dl class="kv">
               <dt>Арендатор</dt><dd>${esc(cur.renter)}</dd>
               <dt>Телефон</dt><dd>${esc(cur.phone || '—')}</dd>
               <dt>Объект</dt><dd>${esc(cur.site || '—')}</dd>
               <dt>Выдан</dt><dd>${fmtDateTime(cur.takenAt)}</dd>
-              <dt>Вернуть до</dt><dd>${fmtDate(cur.dueAt)}</dd>
+              <dt>Вернуть до</dt><dd style="${isOverdue(t) ? 'color:#dc2626;font-weight:800' : ''}">${fmtDate(cur.dueAt)}</dd>
             </dl>
           </div>` : ''}
 
@@ -421,6 +502,23 @@
     $('#actMaint').addEventListener('click', () => openMaintForm(t));
     $('#actStatus').addEventListener('click', () => openStatusForm(t));
     $('#actEdit').addEventListener('click', () => openToolForm(t));
+    $('#actCopies').addEventListener('click', () => openCopiesForm(t));
+
+    // Фото: загрузка/замена/удаление
+    $('#photoBtn').addEventListener('click', () => $('#photoInput').click());
+    $('#photoInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      toast('Загружаю фото…');
+      try {
+        const dataUrl = await resizeImage(file);
+        store.update(t.id, { photo: dataUrl });
+        toast('Фото сохранено'); router();
+      } catch (err) { toast('Не удалось обработать фото', 'err'); }
+    });
+    if ($('#photoDel')) $('#photoDel').addEventListener('click', () => {
+      store.update(t.id, { photo: '' }); toast('Фото убрано'); router();
+    });
+
     $('#actDelete').addEventListener('click', () => {
       if (confirm(`Удалить «${t.name}» вместе со всей историей? Действие необратимо.`)) {
         store.remove(t.id); toast('Инструмент удалён'); location.hash = '#/';
@@ -450,6 +548,85 @@
         ${r.site ? `<div class="timeline__sub">Объект: ${esc(r.site)}</div>` : ''}
         ${r.note ? `<div class="timeline__sub">${esc(r.note)}</div>` : ''}
       </li>`).join('')}</ul>`;
+  }
+
+  // =========================================================
+  //  АНАЛИТИКА
+  // =========================================================
+  function renderStats(view) {
+    const tools = store.tools();
+    const overdue = tools.filter(isOverdue).sort((a, b) => daysOverdue(b) - daysOverdue(a));
+    const rented = tools.filter(t => t.status === 'rented');
+
+    // Арендаторы: сколько держат сейчас и сколько брали всего
+    const renters = {};
+    tools.forEach(t => {
+      (t.rentals || []).forEach(r => {
+        const k = (r.renter || '—').trim();
+        renters[k] = renters[k] || { name: k, total: 0, current: 0 };
+        renters[k].total++;
+      });
+      const cur = currentRental(t);
+      if (cur) { const k = (cur.renter || '—').trim(); if (renters[k]) renters[k].current++; }
+    });
+    const topRenters = Object.values(renters).sort((a, b) => b.total - a.total).slice(0, 10);
+
+    // Занятость: по числу аренд
+    const byUsage = tools.slice().sort((a, b) => (b.rentals || []).length - (a.rentals || []).length);
+    const mostUsed = byUsage.filter(t => (t.rentals || []).length > 0).slice(0, 8);
+    const neverUsed = tools.filter(t => !(t.rentals || []).length).length;
+    const totalRentals = tools.reduce((s, t) => s + (t.rentals || []).length, 0);
+    const utilPct = tools.length ? Math.round(rented.length / tools.length * 100) : 0;
+
+    view.innerHTML = `
+      <a href="#/" class="back-link">← Назад к каталогу</a>
+      <div class="page-head">
+        <div><span class="eyebrow">Сводка по парку</span><h1>Аналитика <span>проката</span></h1></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat stat--rented"><div class="stat__num">${rented.length}</div><div class="stat__label">Сейчас в аренде</div></div>
+        <div class="stat ${overdue.length ? 'stat--over' : ''}"><div class="stat__num">${overdue.length}</div><div class="stat__label">Просрочено</div></div>
+        <div class="stat"><div class="stat__num">${utilPct}%</div><div class="stat__label">Занятость парка</div></div>
+        <div class="stat"><div class="stat__num">${totalRentals}</div><div class="stat__label">Всего выдач</div></div>
+        <div class="stat"><div class="stat__num">${neverUsed}</div><div class="stat__label">Ни разу не брали</div></div>
+      </div>
+
+      <div class="stats-cols">
+        <div class="panel">
+          <h3>⏰ Просрочки (${overdue.length})</h3>
+          ${overdue.length ? `<ul class="stat-list">${overdue.map(t => {
+            const c = currentRental(t);
+            return `<li data-id="${t.id}"><div><b>${esc(t.name)}</b>${t.inventoryNo ? ` · №${esc(t.inventoryNo)}` : ''}<div class="stat-list__sub">👤 ${esc(c.renter)}${c.phone ? ' · ' + esc(c.phone) : ''}</div></div><span class="over-pill">${daysOverdue(t)} дн.</span></li>`;
+          }).join('')}</ul>` : `<p class="tool-card__cat">Просрочек нет 👍</p>`}
+        </div>
+
+        <div class="panel">
+          <h3>🔴 Сейчас в аренде (${rented.length})</h3>
+          ${rented.length ? `<ul class="stat-list">${rented.map(t => {
+            const c = currentRental(t);
+            return `<li data-id="${t.id}"><div><b>${esc(t.name)}</b><div class="stat-list__sub">👤 ${esc(c.renter)} · с ${fmtDate(c.takenAt)}</div></div><span class="tool-card__cat">${c.dueAt ? 'до ' + fmtDate(c.dueAt) : ''}</span></li>`;
+          }).join('')}</ul>` : `<p class="tool-card__cat">Всё в наличии.</p>`}
+        </div>
+
+        <div class="panel">
+          <h3>👥 Топ арендаторов</h3>
+          ${topRenters.length ? `<ul class="stat-list">${topRenters.map(r => `
+            <li><div><b>${esc(r.name)}</b><div class="stat-list__sub">${r.current ? 'сейчас держит: ' + r.current : 'нет на руках'}</div></div><span class="count-pill">${r.total} выдач</span></li>`).join('')}</ul>`
+            : `<p class="tool-card__cat">Пока нет данных по аренде.</p>`}
+        </div>
+
+        <div class="panel">
+          <h3>🔥 Самые востребованные</h3>
+          ${mostUsed.length ? `<ul class="stat-list">${mostUsed.map(t => `
+            <li data-id="${t.id}"><div><b>${esc(t.name)}</b><div class="stat-list__sub">${esc(t.category || '')}</div></div><span class="count-pill">${(t.rentals || []).length} аренд</span></li>`).join('')}</ul>`
+            : `<p class="tool-card__cat">Пока никто ничего не брал.</p>`}
+        </div>
+      </div>
+    `;
+
+    view.querySelectorAll('.stat-list li[data-id]').forEach(li =>
+      li.addEventListener('click', () => { location.hash = '#/t/' + li.dataset.id; }));
   }
 
   // =========================================================
@@ -611,6 +788,77 @@
     });
   }
 
+  // Следующий инвентарный номер: "0042"→0043, "A-100"→A-101 (сохраняет ведущие нули)
+  function nextInv(base, i) {
+    const m = String(base).match(/^(\D*?)(\d+)(\D*)$/);
+    if (!m) return i === 0 ? String(base) : `${base}-${i + 1}`;
+    const num = String(parseInt(m[2], 10) + i).padStart(m[2].length, '0');
+    return m[1] + num + m[3];
+  }
+
+  // Создать N копий модели — каждая со своим QR и инвентарным номером
+  function openCopiesForm(t) {
+    modal.open(`
+      <h2>Создать копии</h2>
+      <p class="tool-card__cat" style="margin-top:-10px">${esc(t.name)}</p>
+      <form id="copyForm">
+        <div class="field-row">
+          ${field('Сколько копий', `<input name="count" type="number" min="1" max="50" value="3" required>`)}
+          ${field('Инв. № с', `<input name="startInv" placeholder="напр. 0042">`, 'нумеруются по порядку')}
+        </div>
+        <div class="field"><label><input type="checkbox" name="withPhoto" checked style="width:auto;margin-right:8px">Скопировать фото и характеристики</label></div>
+        <button class="btn btn--primary btn--block" type="submit">Создать</button>
+      </form>
+    `);
+    $('#copyForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const n = Math.max(1, Math.min(50, parseInt(f.get('count'), 10) || 1));
+      const startInv = f.get('startInv').trim();
+      const withPhoto = f.get('withPhoto') === 'on';
+      for (let i = 0; i < n; i++) {
+        store.add({
+          id: uid(), status: 'available', createdAt: nowISO(),
+          name: t.name, category: t.category,
+          inventoryNo: startInv ? nextInv(startInv, i) : '',
+          serialNo: '', dailyPrice: t.dailyPrice || '', priceText: t.priceText || '',
+          desc: withPhoto ? (t.desc || '') : '', specs: withPhoto ? (t.specs || []) : [],
+          photo: withPhoto ? (t.photo || '') : '',
+          notes: '', rentals: [], maintenance: [],
+        });
+      }
+      modal.close(); toast(`Создано копий: ${n}`); location.hash = '#/'; router();
+    });
+  }
+
+  // Массовое проставление инвентарных номеров
+  function openBulkInvForm() {
+    modal.open(`
+      <h2>Инвентарные номера</h2>
+      <form id="invForm">
+        ${field('Начать с номера', `<input name="start" value="0001" required>`, 'например 0001 — далее по порядку 0002, 0003…')}
+        ${field('Кому проставить', `<select name="scope">
+          <option value="empty">Только без номера</option>
+          <option value="visible">Видимым сейчас (${visibleTools().length})</option>
+          <option value="all">Всем (${store.tools().length})</option>
+        </select>`)}
+        <button class="btn btn--primary btn--block" type="submit">Проставить</button>
+      </form>
+    `);
+    $('#invForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const start = f.get('start').trim() || '0001';
+      const scope = f.get('scope');
+      let targets = scope === 'all' ? store.tools().slice()
+        : scope === 'visible' ? visibleTools()
+        : store.tools().filter(t => !t.inventoryNo);
+      if (!targets.length) { toast('Нет подходящих позиций', 'err'); return; }
+      targets.forEach((t, i) => store.update(t.id, { inventoryNo: nextInv(start, i) }));
+      modal.close(); toast(`Проставлено номеров: ${targets.length}`); router();
+    });
+  }
+
   // =========================================================
   //  QR: печать и скачивание
   // =========================================================
@@ -637,6 +885,44 @@
       <img src="${url}"><div class="inv">${t.inventoryNo ? '№ ' + esc(t.inventoryNo) : ''}</div>
       <div class="id">${esc(t.id)}</div>
       <script>onload=()=>{print();}<\/script></body></html>`);
+    w.document.close();
+  }
+
+  // QR как dataURL для печати листа наклеек
+  function makeQrDataUrl(text) {
+    const tmp = document.createElement('div');
+    new QRCode(tmp, { text, width: 240, height: 240, colorDark: '#1a1d22', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+    return qrImage(tmp);
+  }
+  function qrTextFor(t) {
+    return (location.origin && location.origin !== 'null')
+      ? `${location.origin}${location.pathname}#/t/${t.id}` : t.id;
+  }
+  // Печать листа наклеек (сетка QR) для текущей выборки каталога
+  function printLabels(list) {
+    if (!list || !list.length) { toast('Нет инструментов для печати', 'err'); return; }
+    const cells = list.map(t => `
+      <div class="lbl">
+        <img src="${makeQrDataUrl(qrTextFor(t))}">
+        <div class="lbl__name">${esc(t.name)}</div>
+        <div class="lbl__inv">${t.inventoryNo ? '№ ' + esc(t.inventoryNo) : ''}</div>
+        <div class="lbl__id">${esc(t.id)}</div>
+      </div>`).join('');
+    const w = window.open('', '_blank');
+    w.document.write(`<html><head><title>Наклейки QR (${list.length})</title><style>
+      *{box-sizing:border-box} body{font-family:Manrope,system-ui,sans-serif;margin:0;padding:8mm}
+      h1{font-size:16px;margin:0 0 6mm}
+      .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5mm}
+      .lbl{border:1px dashed #c4c4c4;border-radius:8px;padding:8px;text-align:center;page-break-inside:avoid}
+      .lbl img{width:40mm;height:40mm}
+      .lbl__name{font-weight:800;font-size:11px;margin-top:4px;line-height:1.2}
+      .lbl__inv{font-weight:700;font-size:13px;margin-top:2px}
+      .lbl__id{font-family:monospace;color:#aaa;font-size:8px;margin-top:2px}
+      @media print{ h1{display:none} }
+      </style></head><body>
+      <h1>Наклейки QR — ${list.length} шт. (печать → вырезать по пунктиру)</h1>
+      <div class="grid">${cells}</div>
+      <script>onload=()=>setTimeout(()=>print(),400)<\/script></body></html>`);
     w.document.close();
   }
 

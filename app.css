@@ -141,7 +141,35 @@ body { background: var(--gray-light); padding-bottom: 90px; }
 .toast--err { border-left: 4px solid #dc2626; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
+/* ---------- Кнопки действий в шапке каталога ---------- */
+.head-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.head-actions .btn { padding: 10px 16px; font-size: .92rem; }
+
+/* ---------- Просрочка ---------- */
+.stat--over .stat__num { color: #dc2626; }
+.stat--over { border-color: #f3c2c2; background: #fff5f5; }
+.tool-card--over { border-color: #f3c2c2; }
+.tool-card__renter.is-over { color: #dc2626; font-weight: 700; }
+.overdue-banner { background: #fde8e8; color: #dc2626; font-weight: 700; padding: 10px 14px; border-radius: var(--radius-sm); margin-bottom: 12px; font-size: .92rem; }
+
+/* ---------- Фото инструмента ---------- */
+.tool-card__photo { height: 140px; margin: -16px -16px 4px; background-size: cover; background-position: center; border-radius: var(--radius) var(--radius) 0 0; }
+.photo-box { text-align: center; }
+.photo-box h3 { margin-bottom: 12px; }
+.photo-box__img { width: 100%; border-radius: var(--radius-sm); display: block; margin-bottom: 12px; }
+.photo-box__empty { height: 150px; display: grid; place-items: center; background: var(--gray-light); border-radius: var(--radius-sm); color: var(--text-dim); font-weight: 600; margin-bottom: 12px; }
+
+/* ---------- Аналитика ---------- */
+.stats-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.stat-list { list-style: none; margin: 0; padding: 0; }
+.stat-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.stat-list li:last-child { border-bottom: none; }
+.stat-list li:hover b { color: var(--orange); }
+.stat-list__sub { font-size: .84rem; color: var(--text-dim); margin-top: 2px; font-weight: 500; }
+.over-pill { background: #fde8e8; color: #dc2626; font-weight: 800; font-size: .82rem; padding: 5px 11px; border-radius: 999px; white-space: nowrap; }
+.count-pill { background: var(--orange-soft); color: var(--orange-dark); font-weight: 800; font-size: .82rem; padding: 5px 11px; border-radius: 999px; white-space: nowrap; }
+
 @media print {
-  .app-header, .fab, .actions-row, .app-nav, .back-link { display: none !important; }
+  .app-header, .fab, .actions-row, .app-nav, .back-link, .head-actions { display: none !important; }
   body { background: #fff; }
 }
