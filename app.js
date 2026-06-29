@@ -24,9 +24,11 @@
   };
 
   // ---------- Хранилище данных ----------
+  // Локальный кэш (localStorage) + зеркалирование в общую облачную базу (sync).
   const KEY = 'arenda-tools-v1';
   const store = {
     data: { tools: [] },
+    muted: false,                 // при true — локальные изменения НЕ шлются в облако
     load() {
       try { this.data = JSON.parse(localStorage.getItem(KEY)) || { tools: [] }; }
       catch { this.data = { tools: [] }; }
@@ -35,13 +37,76 @@
     save() { localStorage.setItem(KEY, JSON.stringify(this.data)); },
     tools() { return this.data.tools; },
     get(id) { return this.data.tools.find(t => t.id === id); },
-    add(tool) { this.data.tools.unshift(tool); this.save(); },
+    add(tool) { this.data.tools.unshift(tool); this.save(); if (!this.muted) sync.push(tool); },
     update(id, patch) {
       const t = this.get(id); if (!t) return;
-      Object.assign(t, patch); this.save();
+      Object.assign(t, patch); this.save(); if (!this.muted) sync.push(t);
     },
-    remove(id) { this.data.tools = this.data.tools.filter(t => t.id !== id); this.save(); },
+    remove(id) { this.data.tools = this.data.tools.filter(t => t.id !== id); this.save(); if (!this.muted) sync.remove(id); },
+    // Применение удалённых изменений (из realtime) — БЕЗ обратной отправки в облако
+    applyRemoteUpsert(doc) {
+      const i = this.data.tools.findIndex(t => t.id === doc.id);
+      if (i >= 0) this.data.tools[i] = doc; else this.data.tools.unshift(doc);
+      this.save();
+    },
+    applyRemoteDelete(id) { this.data.tools = this.data.tools.filter(t => t.id !== id); this.save(); },
   };
+
+  // ---------- Облачная синхронизация (Supabase) ----------
+  const sync = {
+    client: null, enabled: false,
+    async init() {
+      const c = window.APP_CONFIG || {};
+      if (!c.SUPABASE_URL || !c.SUPABASE_ANON_KEY || !window.supabase) return false;
+      try {
+        this.client = window.supabase.createClient(c.SUPABASE_URL, c.SUPABASE_ANON_KEY);
+        this.enabled = true; return true;
+      } catch (e) { console.warn('Supabase init failed:', e); return false; }
+    },
+    async pullAll() {
+      const { data, error } = await this.client.from('tools').select('id,doc').order('sort', { ascending: true });
+      if (error) throw error;
+      return data.map(r => r.doc);
+    },
+    async push(tool) {
+      if (!this.enabled) return;
+      try {
+        const sort = store.data.tools.findIndex(t => t.id === tool.id);
+        await this.client.from('tools').upsert({ id: tool.id, doc: tool, sort, updated_at: new Date().toISOString() });
+      } catch (e) { console.warn('sync push:', e); setStatus('offline'); }
+    },
+    async remove(id) {
+      if (!this.enabled) return;
+      try { await this.client.from('tools').delete().eq('id', id); }
+      catch (e) { console.warn('sync remove:', e); setStatus('offline'); }
+    },
+    async pushAll(tools) {
+      if (!this.enabled) return;
+      const rows = tools.map((t, i) => ({ id: t.id, doc: t, sort: i, updated_at: new Date().toISOString() }));
+      for (let i = 0; i < rows.length; i += 200) {
+        const { error } = await this.client.from('tools').upsert(rows.slice(i, i + 200));
+        if (error) throw error;
+      }
+    },
+    subscribe(onChange) {
+      this.client.channel('tools-rt')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tools' }, onChange)
+        .subscribe();
+    },
+  };
+
+  // Индикатор состояния синхронизации в шапке
+  function setStatus(mode) {
+    const el = document.getElementById('syncStatus');
+    if (!el) return;
+    const map = {
+      online:  { t: '● Синхронизировано', c: '#15a34a' },
+      offline: { t: '● Нет сети', c: '#d97706' },
+      local:   { t: '● Локально (без общей базы)', c: '#6b7280' },
+    };
+    const s = map[mode] || map.local;
+    el.textContent = s.t; el.style.color = s.c; el.title = s.t;
+  }
 
   // ---------- Утилиты ----------
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -94,7 +159,7 @@
   // =========================================================
   //  РОУТЕР
   // =========================================================
-  function router() {
+  function render(scroll = true) {
     const hash = location.hash || '#/';
     const view = $('#view');
     if (hash.startsWith('#/t/')) {
@@ -102,9 +167,22 @@
     } else {
       renderCatalog(view);
     }
-    window.scrollTo(0, 0);
+    if (scroll) window.scrollTo(0, 0);
   }
-  window.addEventListener('hashchange', router);
+  function router() { render(true); }   // после локальных действий — перерисовка с прокруткой вверх
+  window.addEventListener('hashchange', () => render(true));
+
+  // Применение изменений, пришедших с других устройств (realtime)
+  function handleRemote(payload) {
+    try {
+      if (payload.eventType === 'DELETE') {
+        if (payload.old && payload.old.id) store.applyRemoteDelete(payload.old.id);
+      } else if (payload.new && payload.new.doc) {
+        store.applyRemoteUpsert(payload.new.doc);
+      }
+      render(false);   // обновляем экран без скачка прокрутки
+    } catch (e) { console.warn('handleRemote:', e); }
+  }
 
   // =========================================================
   //  КАТАЛОГ
@@ -638,7 +716,41 @@
   }
 
   // ---------- Старт ----------
-  store.load();
-  ensureCatalog();
-  router();
+  async function start() {
+    store.load();                       // мгновенный рендер из локального кэша
+    render(true);
+
+    const synced = await sync.init();
+    if (!synced) {                      // бэкенд не настроен — локальный режим (как раньше)
+      ensureCatalog();
+      setStatus('local');
+      render(false);
+      return;
+    }
+
+    try {
+      const remote = await sync.pullAll();
+      if (remote.length === 0) {
+        // Общая база пуста → заполняем каталогом ОДИН раз для всех устройств
+        store.muted = true;
+        store.data.tools = [];
+        seedFromCatalog();
+        store.muted = false;
+        await sync.pushAll(store.tools());
+      } else {
+        store.data.tools = remote;      // общая база — источник истины
+        store.save();
+      }
+      sync.subscribe(handleRemote);     // мгновенные обновления с других устройств
+      setStatus('online');
+      render(false);
+    } catch (e) {
+      console.warn('Не удалось получить общую базу, работаем из кэша:', e);
+      ensureCatalog();
+      setStatus('offline');
+      render(false);
+    }
+  }
+
+  start();
 })();

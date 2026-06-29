@@ -26,6 +26,8 @@ body { background: var(--gray-light); padding-bottom: 90px; }
 .brand__text { font-size: 1.02rem; letter-spacing: -.3px; }
 .brand__text b { color: var(--orange); font-weight: 800; }
 .app-nav { display: flex; align-items: center; gap: 14px; }
+.sync-status { font-size: .76rem; font-weight: 700; color: #6b7280; white-space: nowrap; }
+@media (max-width: 560px) { .sync-status { display: none; } }
 .app-nav__link { font-weight: 600; color: var(--text-on-dark); opacity: .85; }
 .app-nav__link:hover { color: var(--orange); opacity: 1; }
 
