@@ -7,6 +7,6 @@
    Эти значения безопасно держать в открытом коде (доступ ограничен правилами базы).
    ========================================================= */
 window.APP_CONFIG = {
-  SUPABASE_URL: '',
-  SUPABASE_ANON_KEY: '',
+  SUPABASE_URL: 'https://ffkeubeudfqeuehwbbpe.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_fiqwgj26OG_BcV-S3gA2Tg_XT3cRMJf',
 };
