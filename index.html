@@ -3,12 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1a1d22">
+  <meta name="theme-color" content="#1a1d22" id="themeColor">
   <title>АрендаСтрой · Инструмент</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="theme.css?v=9">
-  <link rel="stylesheet" href="app.css?v=9">
+  <script>
+    // Применяем сохранённую тему сразу, до отрисовки — чтобы не было мигания
+    try { var _t = localStorage.getItem('theme'); if (_t === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="theme.css?v=10">
+  <link rel="stylesheet" href="app.css?v=10">
 </head>
 <body>
   <!-- Шапка -->
@@ -21,7 +25,11 @@
       <nav class="app-nav">
         <span class="sync-status" id="syncStatus" title="Состояние синхронизации"></span>
         <a href="#/" class="app-nav__link" data-nav="catalog">Каталог</a>
-        <button class="btn btn--primary btn--sm" id="navScan">📷 Сканировать</button>
+        <button class="theme-toggle" id="themeToggle" title="Тёмная / светлая тема" aria-label="Переключить тему"></button>
+        <button class="btn btn--primary btn--sm" id="navScan">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M4 12h16"/></svg>
+          Сканировать
+        </button>
       </nav>
     </div>
   </header>
@@ -29,12 +37,16 @@
   <main id="view" class="app-main"></main>
 
   <!-- Плавающая кнопка сканера (моб.) -->
-  <button class="fab pulse" id="fabScan" title="Сканировать QR">📷</button>
+  <button class="fab pulse" id="fabScan" title="Сканировать QR" aria-label="Сканировать QR">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M4 12h16"/></svg>
+  </button>
 
   <!-- Модальное окно -->
   <div class="modal-overlay" id="modal" hidden>
     <div class="modal" role="dialog" aria-modal="true">
-      <button class="modal__close" id="modalClose" aria-label="Закрыть">✕</button>
+      <button class="modal__close" id="modalClose" aria-label="Закрыть">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
       <div class="modal__body" id="modalBody"></div>
     </div>
   </div>
@@ -43,11 +55,11 @@
   <div class="toast-wrap" id="toastWrap"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=9"></script>
+  <script src="config.js?v=10"></script>
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/html5-qrcode.min.js"></script>
-  <script src="catalog-data.js?v=9"></script>
-  <script src="app.js?v=9"></script>
+  <script src="catalog-data.js?v=10"></script>
+  <script src="app.js?v=10"></script>
   <script>
     // Убираем любой ранее установленный service worker и его кэш — чтобы устройства
     // всегда получали свежую версию (раньше из-за кэша подгружалась старая).

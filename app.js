@@ -128,6 +128,45 @@
   const nowISO = () => new Date().toISOString();
   const todayInput = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
+  // ---------- Векторные иконки (единый линейный стиль) ----------
+  const ICONS = {
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    scan: '<path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M4 12h16"/>',
+    camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3.2"/>',
+    chart: '<path d="M3 3v18h18"/><path d="M7 16v-5M12 16V8M17 16v-3"/>',
+    tag: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><circle cx="7" cy="7" r="1.3"/>',
+    hash: '<path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/>',
+    user: '<path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="8" r="4"/>',
+    users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    alarm: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M5 3L2.5 5.5M22 6l-2.5-2.5"/>',
+    handout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',
+    inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+    wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>',
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    trash: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>',
+    printer: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/>',
+    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+    refresh: '<path d="M21 3v6h-6M3 12a9 9 0 0 1 15-6.7L21 9M3 21v-6h6M21 12a9 9 0 0 1-15 6.7L3 15"/>',
+    x: '<path d="M18 6L6 18M6 6l12 12"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+    package: '<path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/>',
+    help: '<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/>',
+    list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    trend: '<path d="M22 7l-8.5 8.5-4-4L2 19M16 7h6v6"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>',
+    keyboard: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
+  };
+  function icon(name, cls = 'ic') {
+    return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+  }
+  // Цветной кружок-индикатор (например «в аренде»)
+  function dot(color) {
+    return `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="${color}"/></svg>`;
+  }
+
   function fmtDate(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
@@ -279,10 +318,10 @@
           <h1>Каталог <span>инструмента</span></h1>
         </div>
         <div class="head-actions">
-          <a class="btn btn--outline" href="#/stats">📊 Аналитика</a>
-          <button class="btn btn--outline" id="printLabels">🏷 Наклейки</button>
-          <button class="btn btn--outline" id="bulkInv">№ Инв. номера</button>
-          <button class="btn btn--primary" id="addTool">+ Добавить</button>
+          <a class="btn btn--outline" href="#/stats">${icon('chart')} Аналитика</a>
+          <button class="btn btn--outline" id="printLabels">${icon('tag')} Наклейки</button>
+          <button class="btn btn--outline" id="bulkInv">${icon('hash')} Инв. номера</button>
+          <button class="btn btn--primary" id="addTool">${icon('plus')} Добавить</button>
         </div>
       </div>
 
@@ -295,11 +334,14 @@
       </div>
 
       <div class="toolbar">
-        <input type="search" class="search" id="search" placeholder="🔍 Поиск по названию, № или категории…" value="${esc(filterState.q)}">
+        <div class="search-wrap">
+          <span class="search-ic">${icon('search')}</span>
+          <input type="search" class="search" id="search" placeholder="Поиск по названию, № или категории…" value="${esc(filterState.q)}">
+        </div>
       </div>
       <div class="filters" id="filters">
         ${['all','available','rented','overdue','maintenance','broken'].map(s => {
-          const label = s === 'all' ? 'Все' : (s === 'overdue' ? '⏰ Просрочено' : STATUS[s].label);
+          const label = s === 'all' ? 'Все' : (s === 'overdue' ? icon('alarm') + ' Просрочено' : STATUS[s].label);
           return `<button class="chip ${filterState.status === s ? 'is-active' : ''}" data-status="${s}">${label}</button>`;
         }).join('')}
       </div>
@@ -337,12 +379,12 @@
     const list = visibleTools();
 
     if (!store.tools().length) {
-      grid.innerHTML = `<div class="empty"><div class="empty__icon">🧰</div>
+      grid.innerHTML = `<div class="empty"><div class="empty__icon">${icon('package', 'ic-xl')}</div>
         <p>Пока нет ни одного инструмента.<br>Добавьте первый — и получите для него QR-код.</p>
-        <button class="btn btn--primary" onclick="document.getElementById('addTool').click()">+ Добавить инструмент</button></div>`;
+        <button class="btn btn--primary" onclick="document.getElementById('addTool').click()">${icon('plus')} Добавить инструмент</button></div>`;
       return;
     }
-    if (!list.length) { grid.innerHTML = `<div class="empty"><div class="empty__icon">🔍</div><p>Ничего не найдено по заданным условиям.</p></div>`; return; }
+    if (!list.length) { grid.innerHTML = `<div class="empty"><div class="empty__icon">${icon('search', 'ic-xl')}</div><p>Ничего не найдено по заданным условиям.</p></div>`; return; }
 
     grid.className = 'grid';
     grid.innerHTML = list.map(t => {
@@ -359,7 +401,7 @@
             </div>
             <span class="status status--${st.cls}">${st.label}</span>
           </div>
-          ${cur ? `<div class="tool-card__renter ${over ? 'is-over' : ''}">👤 ${esc(cur.renter)} · ${over ? `⏰ просрочка ${daysOverdue(t)} дн.` : 'до ' + fmtDate(cur.dueAt)}</div>` : ''}
+          ${cur ? `<div class="tool-card__renter ${over ? 'is-over' : ''}">${icon('user')} ${esc(cur.renter)} · ${over ? `${icon('alarm')} просрочка ${daysOverdue(t)} дн.` : 'до ' + fmtDate(cur.dueAt)}</div>` : ''}
           <div class="tool-card__meta">
             ${t.inventoryNo ? `<span>№ ${esc(t.inventoryNo)}</span>` : ''}
             ${(t.dailyPrice || t.priceText) ? `<span>${priceLabel(t)}</span>` : ''}
@@ -383,7 +425,7 @@
     const t = store.get(id);
     if (!t) {
       view.innerHTML = `<a href="#/" class="back-link">← Назад к каталогу</a>
-        <div class="empty"><div class="empty__icon">❓</div><p>Инструмент не найден.<br>Возможно, QR-код от другого устройства/базы.</p></div>`;
+        <div class="empty"><div class="empty__icon">${icon('help', 'ic-xl')}</div><p>Инструмент не найден.<br>Возможно, QR-код от другого устройства/базы.</p></div>`;
       return;
     }
     const st = STATUS[t.status] || STATUS.available;
@@ -405,11 +447,11 @@
             <h3>Фото</h3>
             ${t.photo
               ? `<img class="photo-box__img" src="${t.photo}" alt="">`
-              : `<div class="photo-box__empty">📷 Нет фото</div>`}
+              : `<div class="photo-box__empty">${icon('camera', 'ic-xl')}<span>Нет фото</span></div>`}
             <input type="file" id="photoInput" accept="image/*" hidden>
             <div class="actions-row" style="justify-content:center">
-              <button class="btn btn--outline btn--sm" id="photoBtn">${t.photo ? '🔄 Заменить' : '📷 Добавить фото'}</button>
-              ${t.photo ? `<button class="btn btn--outline btn--sm" id="photoDel" style="color:#dc2626;border-color:#f3c2c2">✕ Убрать</button>` : ''}
+              <button class="btn btn--outline btn--sm" id="photoBtn">${t.photo ? icon('refresh') + ' Заменить' : icon('camera') + ' Добавить фото'}</button>
+              ${t.photo ? `<button class="btn btn--outline btn--sm" id="photoDel" style="color:#dc2626;border-color:#f3c2c2">${icon('x')} Убрать</button>` : ''}
             </div>
           </div>
 
@@ -418,8 +460,8 @@
             <div class="qr-box__code" id="qrcode"></div>
             <div class="qr-box__id">${esc(t.id)}</div>
             <div class="actions-row" style="justify-content:center">
-              <button class="btn btn--outline btn--sm" id="printQr">🖨 Печать</button>
-              <button class="btn btn--outline btn--sm" id="downloadQr">⬇ PNG</button>
+              <button class="btn btn--outline btn--sm" id="printQr">${icon('printer')} Печать</button>
+              <button class="btn btn--outline btn--sm" id="downloadQr">${icon('download')} PNG</button>
             </div>
           </div>
         </div>
@@ -429,15 +471,15 @@
             <h3>Действия</h3>
             <div class="actions-row">
               ${t.status === 'available'
-                ? `<button class="btn btn--primary" id="actRent">🤝 Выдать в аренду</button>`
+                ? `<button class="btn btn--primary" id="actRent">${icon('handout')} Выдать в аренду</button>`
                 : ''}
               ${t.status === 'rented'
-                ? `<button class="btn btn--primary" id="actReturn">📥 Принять возврат</button>`
+                ? `<button class="btn btn--primary" id="actReturn">${icon('inbox')} Принять возврат</button>`
                 : ''}
-              <button class="btn btn--outline" id="actMaint">🔧 Записать ТО</button>
-              <button class="btn btn--outline" id="actStatus">⚙ Статус</button>
-              <button class="btn btn--outline" id="actEdit">✏ Изменить</button>
-              <button class="btn btn--outline" id="actCopies">📑 Создать копии</button>
+              <button class="btn btn--outline" id="actMaint">${icon('wrench')} Записать ТО</button>
+              <button class="btn btn--outline" id="actStatus">${icon('gear')} Статус</button>
+              <button class="btn btn--outline" id="actEdit">${icon('edit')} Изменить</button>
+              <button class="btn btn--outline" id="actCopies">${icon('copy')} Создать копии</button>
             </div>
           </div>
 
@@ -459,8 +501,8 @@
 
           ${cur ? `
           <div class="panel" style="border-color:${isOverdue(t) ? '#dc2626' : 'var(--orange)'}">
-            <h3>🔴 Сейчас в аренде</h3>
-            ${isOverdue(t) ? `<div class="overdue-banner">⏰ Просрочено на ${daysOverdue(t)} дн. — пора вернуть!</div>` : ''}
+            <h3>${dot(isOverdue(t) ? '#dc2626' : 'var(--orange)')} Сейчас в аренде</h3>
+            ${isOverdue(t) ? `<div class="overdue-banner">${icon('alarm')} Просрочено на ${daysOverdue(t)} дн. — пора вернуть!</div>` : ''}
             <dl class="kv">
               <dt>Арендатор</dt><dd>${esc(cur.renter)}</dd>
               <dt>Телефон</dt><dd>${esc(cur.phone || '—')}</dd>
@@ -471,17 +513,17 @@
           </div>` : ''}
 
           <div class="panel">
-            <h3>🔧 История ТО (${(t.maintenance || []).length})</h3>
+            <h3>${icon('wrench')} История ТО (${(t.maintenance || []).length})</h3>
             ${renderMaintenance(t)}
           </div>
 
           <div class="panel">
-            <h3>📜 История аренд (${(t.rentals || []).length})</h3>
+            <h3>${icon('list')} История аренд (${(t.rentals || []).length})</h3>
             ${renderRentals(t)}
           </div>
 
           <div class="panel">
-            <button class="btn btn--outline btn--sm" id="actDelete" style="color:#dc2626;border-color:#f3c2c2">🗑 Удалить инструмент</button>
+            <button class="btn btn--outline btn--sm" id="actDelete" style="color:#dc2626;border-color:#f3c2c2">${icon('trash')} Удалить инструмент</button>
           </div>
         </div>
       </div>
@@ -544,7 +586,7 @@
     return `<ul class="timeline">${list.map(r => `
       <li${!r.returnedAt ? ' style="border-color:var(--orange)"' : ''}>
         <div class="timeline__date">${fmtDateTime(r.takenAt)} ${r.returnedAt ? '→ ' + fmtDateTime(r.returnedAt) : '· <b style="color:var(--orange)">не возвращён</b>'}</div>
-        <div class="timeline__title">👤 ${esc(r.renter)}${r.phone ? ' · ' + esc(r.phone) : ''}</div>
+        <div class="timeline__title">${icon('user')} ${esc(r.renter)}${r.phone ? ' · ' + esc(r.phone) : ''}</div>
         ${r.site ? `<div class="timeline__sub">Объект: ${esc(r.site)}</div>` : ''}
         ${r.note ? `<div class="timeline__sub">${esc(r.note)}</div>` : ''}
       </li>`).join('')}</ul>`;
@@ -594,30 +636,30 @@
 
       <div class="stats-cols">
         <div class="panel">
-          <h3>⏰ Просрочки (${overdue.length})</h3>
+          <h3>${icon('alarm')} Просрочки (${overdue.length})</h3>
           ${overdue.length ? `<ul class="stat-list">${overdue.map(t => {
             const c = currentRental(t);
-            return `<li data-id="${t.id}"><div><b>${esc(t.name)}</b>${t.inventoryNo ? ` · №${esc(t.inventoryNo)}` : ''}<div class="stat-list__sub">👤 ${esc(c.renter)}${c.phone ? ' · ' + esc(c.phone) : ''}</div></div><span class="over-pill">${daysOverdue(t)} дн.</span></li>`;
-          }).join('')}</ul>` : `<p class="tool-card__cat">Просрочек нет 👍</p>`}
+            return `<li data-id="${t.id}"><div><b>${esc(t.name)}</b>${t.inventoryNo ? ` · №${esc(t.inventoryNo)}` : ''}<div class="stat-list__sub">${icon('user')} ${esc(c.renter)}${c.phone ? ' · ' + esc(c.phone) : ''}</div></div><span class="over-pill">${daysOverdue(t)} дн.</span></li>`;
+          }).join('')}</ul>` : `<p class="tool-card__cat">Просрочек нет.</p>`}
         </div>
 
         <div class="panel">
-          <h3>🔴 Сейчас в аренде (${rented.length})</h3>
+          <h3>${dot('var(--orange)')} Сейчас в аренде (${rented.length})</h3>
           ${rented.length ? `<ul class="stat-list">${rented.map(t => {
             const c = currentRental(t);
-            return `<li data-id="${t.id}"><div><b>${esc(t.name)}</b><div class="stat-list__sub">👤 ${esc(c.renter)} · с ${fmtDate(c.takenAt)}</div></div><span class="tool-card__cat">${c.dueAt ? 'до ' + fmtDate(c.dueAt) : ''}</span></li>`;
+            return `<li data-id="${t.id}"><div><b>${esc(t.name)}</b><div class="stat-list__sub">${icon('user')} ${esc(c.renter)} · с ${fmtDate(c.takenAt)}</div></div><span class="tool-card__cat">${c.dueAt ? 'до ' + fmtDate(c.dueAt) : ''}</span></li>`;
           }).join('')}</ul>` : `<p class="tool-card__cat">Всё в наличии.</p>`}
         </div>
 
         <div class="panel">
-          <h3>👥 Топ арендаторов</h3>
+          <h3>${icon('users')} Топ арендаторов</h3>
           ${topRenters.length ? `<ul class="stat-list">${topRenters.map(r => `
             <li><div><b>${esc(r.name)}</b><div class="stat-list__sub">${r.current ? 'сейчас держит: ' + r.current : 'нет на руках'}</div></div><span class="count-pill">${r.total} выдач</span></li>`).join('')}</ul>`
             : `<p class="tool-card__cat">Пока нет данных по аренде.</p>`}
         </div>
 
         <div class="panel">
-          <h3>🔥 Самые востребованные</h3>
+          <h3>${icon('trend')} Самые востребованные</h3>
           ${mostUsed.length ? `<ul class="stat-list">${mostUsed.map(t => `
             <li data-id="${t.id}"><div><b>${esc(t.name)}</b><div class="stat-list__sub">${esc(t.category || '')}</div></div><span class="count-pill">${(t.rentals || []).length} аренд</span></li>`).join('')}</ul>`
             : `<p class="tool-card__cat">Пока никто ничего не брал.</p>`}
@@ -688,7 +730,7 @@
         </div>
         ${field('Объект / адрес', `<input name="site" placeholder="ЖК Северный, корп. 3">`)}
         ${field('Примечание', `<textarea name="note" rows="2" placeholder="Залог, комплект…"></textarea>`)}
-        <button class="btn btn--primary btn--block" type="submit">🤝 Выдать</button>
+        <button class="btn btn--primary btn--block" type="submit">${icon('handout')} Выдать</button>
       </form>
     `);
     $('#rentForm').addEventListener('submit', (e) => {
@@ -718,7 +760,7 @@
           <option value="broken">Неисправен</option>
         </select>`)}
         ${field('Примечание', `<textarea name="note" rows="2" placeholder="Замечания по возврату…"></textarea>`)}
-        <button class="btn btn--primary btn--block" type="submit">📥 Принять</button>
+        <button class="btn btn--primary btn--block" type="submit">${icon('inbox')} Принять</button>
       </form>
     `);
     $('#retForm').addEventListener('submit', (e) => {
@@ -951,7 +993,7 @@
       (decoded) => { handleScan(decoded); },
       () => {}
     ).catch(err => {
-      $('#reader').innerHTML = `<p class="empty">📷 Нет доступа к камере.<br><span class="tool-card__cat">${esc(String(err))}</span><br>Используйте ручной ввод.</p>`;
+      $('#reader').innerHTML = `<p class="empty">${icon('camera', 'ic-xl')}<br>Нет доступа к камере.<br><span class="tool-card__cat">${esc(String(err))}</span><br>Используйте ручной ввод.</p>`;
     });
   }
 
@@ -974,6 +1016,22 @@
 
   $('#navScan').addEventListener('click', openScanner);
   $('#fabScan').addEventListener('click', openScanner);
+
+  // ---------- Тёмная / светлая тема ----------
+  function setTheme(theme) {
+    const dark = theme === 'dark';
+    document.documentElement.dataset.theme = dark ? 'dark' : '';
+    try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) {}
+    const tc = document.getElementById('themeColor'); if (tc) tc.setAttribute('content', dark ? '#15171c' : '#1a1d22');
+    const btn = document.getElementById('themeToggle'); if (btn) btn.innerHTML = icon(dark ? 'sun' : 'moon');
+  }
+  (function initTheme() {
+    let saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
+    setTheme(saved === 'dark' ? 'dark' : 'light');
+    const btn = document.getElementById('themeToggle');
+    if (btn) btn.addEventListener('click', () =>
+      setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+  })();
 
   // =========================================================
   //  ИМПОРТ КАТАЛОГА (при первом запуске)
