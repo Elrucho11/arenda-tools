@@ -79,7 +79,7 @@ body { background: var(--gray-light); padding-bottom: 90px; }
 }
 .brand__text { font-size: 1.02rem; letter-spacing: -.3px; }
 .brand__text b { color: var(--orange); font-weight: 800; }
-.brand__logo { width: 44px; height: 44px; display: block; border-radius: 12px; transition: transform .2s; }
+.brand__logo { width: 44px; height: 44px; display: block; transition: transform .2s; }
 .brand:hover .brand__logo { transform: translateY(-1px) scale(1.04); }
 .app-nav { display: flex; align-items: center; gap: 14px; }
 .sync-status { font-size: .76rem; font-weight: 700; color: #6b7280; white-space: nowrap; }

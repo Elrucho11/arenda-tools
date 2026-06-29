@@ -6,58 +6,23 @@
   <meta name="theme-color" content="#1a1d22" id="themeColor">
   <title>АрендаСтрой · Инструмент</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="icon" href="logo.svg?v=12" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=12">
   <script>
     // Применяем сохранённую тему сразу, до отрисовки — чтобы не было мигания
     try { var _t = localStorage.getItem('theme'); if (_t === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}
   </script>
-  <link rel="stylesheet" href="theme.css?v=11">
-  <link rel="stylesheet" href="app.css?v=11">
+  <link rel="stylesheet" href="theme.css?v=12">
+  <link rel="stylesheet" href="app.css?v=12">
 </head>
 <body>
   <!-- Шапка -->
   <header class="app-header">
     <div class="app-header__inner">
       <a href="#/" class="brand" aria-label="АрендаСтрой · Инструмент">
-        <svg class="brand__logo" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="АрендаСтрой">
-          <rect width="300" height="300" rx="66" fill="#ff6a00"/>
-          <g stroke="#fff" stroke-width="9" stroke-linecap="square" fill="none">
-            <!-- стойки лесов -->
-            <line x1="76" y1="50" x2="76" y2="250"/>
-            <line x1="100" y1="58" x2="100" y2="238"/>
-            <line x1="200" y1="58" x2="200" y2="238"/>
-            <line x1="224" y1="50" x2="224" y2="250"/>
-            <!-- верхние перекладины (связь башен) -->
-            <line x1="76" y1="60" x2="224" y2="60"/>
-            <line x1="76" y1="74" x2="224" y2="74"/>
-            <!-- ступени левой лестницы -->
-            <line x1="76" y1="92" x2="100" y2="92"/>
-            <line x1="76" y1="118" x2="100" y2="118"/>
-            <line x1="76" y1="144" x2="100" y2="144"/>
-            <line x1="76" y1="170" x2="100" y2="170"/>
-            <line x1="76" y1="196" x2="100" y2="196"/>
-            <line x1="76" y1="222" x2="100" y2="222"/>
-            <!-- ступени правой лестницы -->
-            <line x1="200" y1="92" x2="224" y2="92"/>
-            <line x1="200" y1="118" x2="224" y2="118"/>
-            <line x1="200" y1="144" x2="224" y2="144"/>
-            <line x1="200" y1="170" x2="224" y2="170"/>
-            <line x1="200" y1="196" x2="224" y2="196"/>
-            <line x1="200" y1="222" x2="224" y2="222"/>
-            <!-- центральные раскосы (две секции X) -->
-            <line x1="100" y1="88" x2="200" y2="156"/>
-            <line x1="200" y1="88" x2="100" y2="156"/>
-            <line x1="100" y1="156" x2="200" y2="224"/>
-            <line x1="200" y1="156" x2="100" y2="224"/>
-            <line x1="100" y1="88" x2="200" y2="88"/>
-            <line x1="100" y1="156" x2="200" y2="156"/>
-            <line x1="100" y1="224" x2="200" y2="224"/>
-          </g>
-          <g stroke="#fff" stroke-width="13" stroke-linecap="square">
-            <!-- опорные пятки -->
-            <line x1="62" y1="252" x2="114" y2="252"/>
-            <line x1="186" y1="252" x2="238" y2="252"/>
-          </g>
+        <svg class="brand__logo" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="АрендаСтрой">
+          <path d="M0 14.1067C0 6.31577 6.31577 0 14.1067 0H80V65.8933C80 73.6842 73.6842 80 65.8933 80H0V14.1067Z" fill="#ff6a00"/>
+          <path fill-rule="evenodd" clip-rule="evenodd" d="M24.892 15.1213H16.4238V10H14.6289V15.1213H11.5789V17.0347H14.6289V31.6187H11.5789V33.5321H14.6289V47.2478H11.5789V49.1612H14.6289V63.7451H11.5789V65.6586H14.6289V68.0866H10V70H31.3158V68.0866H26.6869V65.6586H54.1026V68.0866H48.6842V70H70V68.0866H65.3711V65.6586H68.4211V63.7451H65.3711V49.1612H68.4211V47.2478H65.3711V33.5321H68.4211V31.6187H65.3711V17.0347H68.4211V15.1213H65.3711V10H63.5762V15.1213H55.8974V10H54.1026V15.1213H26.6869V10H24.892V15.1213ZM16.4238 17.0347V31.6187H24.892V17.0347H16.4238ZM16.4238 36.8284V33.5321H24.892V36.8284H16.4238ZM26.6869 34.126L38.3941 40.3899L26.6869 46.6538V34.126ZM29.5782 47.2478L40.3947 41.4604L51.2112 47.2478H29.5782ZM29.4005 49.1612H51.389L40.3947 55.3705L29.4005 49.1612ZM26.6869 49.794L38.4777 56.4532L26.6869 63.1123V49.794ZM24.892 49.1612V63.7451H16.4238V49.1612H24.892ZM16.4238 68.0866V65.6586H24.892V68.0866H16.4238ZM24.892 47.2478H16.4238V43.9515H24.892V47.2478ZM24.892 42.0381H16.4238V38.7418H24.892V42.0381ZM40.3947 57.5359L29.4005 63.7451H51.389L40.3947 57.5359ZM42.3118 56.4532L54.1026 63.1123V49.794L42.3118 56.4532ZM55.8974 68.0866V65.6586H63.5762V68.0866H55.8974ZM55.8974 63.7451H63.5762V59.5806H55.8974V63.7451ZM63.5762 54.3709V57.6672H55.8974V54.3709H63.5762ZM63.5762 52.4575H55.8974V49.1612H63.5762V52.4575ZM63.5762 47.2478H55.8974V33.5321H63.5762V47.2478ZM42.3954 40.3899L54.1026 34.126V46.6538L42.3954 40.3899ZM63.5762 31.6187H55.8974V28.3224H63.5762V31.6187ZM63.5762 26.409H55.8974V22.6785H63.5762V26.409ZM63.5762 20.7651H55.8974V17.0347H63.5762V20.7651ZM29.4005 17.0347H51.389L40.3947 23.244L29.4005 17.0347ZM26.6869 17.6675L38.4777 24.3267L26.6869 30.9858V17.6675ZM40.3947 25.4094L29.4005 31.6187H51.389L40.3947 25.4094ZM40.3947 39.3195L29.5782 33.5321H51.2112L40.3947 39.3195ZM42.3118 24.3267L54.1026 30.9858V17.6675L42.3118 24.3267Z" fill="white"/>
         </svg>
       </a>
       <nav class="app-nav">
@@ -93,11 +58,11 @@
   <div class="toast-wrap" id="toastWrap"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=11"></script>
+  <script src="config.js?v=12"></script>
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/html5-qrcode.min.js"></script>
-  <script src="catalog-data.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="catalog-data.js?v=12"></script>
+  <script src="app.js?v=12"></script>
   <script>
     // Убираем любой ранее установленный service worker и его кэш — чтобы устройства
     // всегда получали свежую версию (раньше из-за кэша подгружалась старая).
