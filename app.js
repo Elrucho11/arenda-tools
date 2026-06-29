@@ -53,6 +53,7 @@
   };
 
   // ---------- Облачная синхронизация (Supabase) ----------
+  let pending = 0;   // счётчик незавершённых отправок в облако (для безопасного поллинга)
   const sync = {
     client: null, enabled: false,
     async init() {
@@ -70,15 +71,24 @@
     },
     async push(tool) {
       if (!this.enabled) return;
+      pending++;
       try {
         const sort = store.data.tools.findIndex(t => t.id === tool.id);
-        await this.client.from('tools').upsert({ id: tool.id, doc: tool, sort, updated_at: new Date().toISOString() });
+        const { error } = await this.client.from('tools').upsert({ id: tool.id, doc: tool, sort, updated_at: new Date().toISOString() });
+        if (error) throw error;
+        setStatus('online');
       } catch (e) { console.warn('sync push:', e); setStatus('offline'); }
+      finally { pending--; }
     },
     async remove(id) {
       if (!this.enabled) return;
-      try { await this.client.from('tools').delete().eq('id', id); }
-      catch (e) { console.warn('sync remove:', e); setStatus('offline'); }
+      pending++;
+      try {
+        const { error } = await this.client.from('tools').delete().eq('id', id);
+        if (error) throw error;
+        setStatus('online');
+      } catch (e) { console.warn('sync remove:', e); setStatus('offline'); }
+      finally { pending--; }
     },
     async pushAll(tools) {
       if (!this.enabled) return;
@@ -171,6 +181,20 @@
   }
   function router() { render(true); }   // после локальных действий — перерисовка с прокруткой вверх
   window.addEventListener('hashchange', () => render(true));
+
+  // Резервная синхронизация: периодически подтягиваем общую базу — на случай,
+  // если realtime-websocket заблокирован сетью. Безопасно: не трогаем локальные
+  // данные, пока есть незавершённые отправки (pending), чтобы не затереть свежий ввод.
+  async function pollSync() {
+    if (!sync.enabled || pending > 0) return;
+    try {
+      const remote = await sync.pullAll();
+      setStatus('online');
+      if (JSON.stringify(store.data.tools) !== JSON.stringify(remote)) {
+        store.data.tools = remote; store.save(); render(false);
+      }
+    } catch (e) { setStatus('offline'); }
+  }
 
   // Применение изменений, пришедших с других устройств (realtime)
   function handleRemote(payload) {
@@ -744,6 +768,8 @@
       sync.subscribe(handleRemote);     // мгновенные обновления с других устройств
       setStatus('online');
       render(false);
+      setInterval(pollSync, 12000);     // резервная подкачка каждые 12 сек
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) pollSync(); });
     } catch (e) {
       console.warn('Не удалось получить общую базу, работаем из кэша:', e);
       ensureCatalog();
