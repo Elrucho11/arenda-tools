@@ -751,6 +751,130 @@
     return d.length > 3 ? d.slice(0, 3) + '-' + d.slice(3) : d;
   };
 
+  // =========================================================
+  //  РАСПОЗНАВАНИЕ ПАСПОРТА РФ ПО ФОТО (Tesseract.js, офлайн)
+  //  Читаем машиночитаемую зону (2 строки внизу разворота).
+  // =========================================================
+  // Транслитерация МЧЗ внутреннего паспорта РФ → кириллица (включая цифровые коды букв)
+  const MRZ_CYR = {
+    A: 'А', B: 'Б', V: 'В', G: 'Г', D: 'Д', E: 'Е', '2': 'Ё', J: 'Ж', Z: 'З', I: 'И',
+    Q: 'Й', K: 'К', L: 'Л', M: 'М', N: 'Н', O: 'О', P: 'П', R: 'Р', S: 'С', T: 'Т',
+    U: 'У', F: 'Ф', H: 'Х', C: 'Ц', '3': 'Ч', '4': 'Ш', W: 'Щ', X: 'Ъ', Y: 'Ы',
+    '9': 'Ь', '6': 'Э', '8': 'Ю', '7': 'Я',
+  };
+  const mrzToCyr = (s) => {
+    const w = [...String(s)].map(c => MRZ_CYR[c] || '').join('');
+    return w ? w[0] + w.slice(1).toLowerCase() : '';
+  };
+  // Контрольная цифра МЧЗ: веса 7-3-1, A=10…Z=35, '<'=0
+  const mrzCheck = (s) => [...s].reduce((sum, c, i) =>
+    sum + (c === '<' ? 0 : (c >= '0' && c <= '9' ? +c : c.charCodeAt(0) - 55)) * [7, 3, 1][i % 3], 0) % 10;
+
+  function parseMRZ(raw) {
+    const lines = String(raw).toUpperCase().split('\n')
+      .map(l => l.replace(/[^A-Z0-9<]/g, '')).filter(l => l.length >= 28);
+    let l1 = '', l2 = '';
+    for (let i = 0; i < lines.length; i++) {
+      if (/^P[NM<]/.test(lines[i]) && lines[i + 1]) { l1 = lines[i]; l2 = lines[i + 1]; break; }
+    }
+    if (!l2) { // запасной поиск: строка, начинающаяся с 7+ цифр — вторая строка МЧЗ
+      const idx = lines.findIndex(l => /^\d{7}/.test(l.replace(/O/g, '0').replace(/I/g, '1')));
+      if (idx >= 0) { l2 = lines[idx]; l1 = idx > 0 ? lines[idx - 1] : ''; }
+    }
+    if (!l2) return null;
+    l1 = l1.padEnd(44, '<'); l2 = l2.padEnd(44, '<');
+    const dig = (s) => s.replace(/O/g, '0').replace(/I/g, '1').replace(/B/g, '8');
+    const docField = dig(l2.slice(0, 9));   // 3 первые цифры серии + номер
+    const birth = dig(l2.slice(13, 19));
+    const personal = dig(l2.slice(28, 41)); // 4-я цифра серии + дата выдачи + код подразделения
+    if (!/^\d{9}$/.test(docField) || !/^\d{6}$/.test(birth)) return null;
+    const valid = mrzCheck(l2.slice(0, 9)) === +dig(l2[9]) && mrzCheck(l2.slice(13, 19)) === +dig(l2[19]);
+    let lastName = '', firstName = '', midName = '';
+    const m = l1.match(/^P[A-Z<][A-Z<]{3}(.+)$/);
+    if (m) {
+      const parts = m[1].split('<<');
+      lastName = mrzToCyr(parts[0] || '');
+      const given = (parts[1] || '').split('<').filter(Boolean);
+      firstName = mrzToCyr(given[0] || '');
+      midName = mrzToCyr(given[1] || '');
+    }
+    const curYY = new Date().getFullYear() % 100;
+    const date = (yymmdd, pivot) => {
+      if (!/^\d{6}$/.test(yymmdd)) return '';
+      const yy = +yymmdd.slice(0, 2), mm = +yymmdd.slice(2, 4), dd = +yymmdd.slice(4, 6);
+      if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return '';
+      return `${yy > pivot ? 1900 + yy : 2000 + yy}-${yymmdd.slice(2, 4)}-${yymmdd.slice(4, 6)}`;
+    };
+    const series4 = /^\d/.test(personal) ? personal[0] : '';
+    const issue = personal.slice(1, 7), dept = personal.slice(7, 13);
+    return {
+      lastName, firstName, midName,
+      series: docField.slice(0, 3) + series4,
+      number: docField.slice(3, 9),
+      birthDate: date(birth, curYY),        // рождение — не в будущем
+      issueDate: date(issue, 96),           // паспорта РФ выдаются с 1997 года
+      deptCode: /^\d{6}$/.test(dept) ? dept.slice(0, 3) + '-' + dept.slice(3) : '',
+      valid,
+    };
+  }
+
+  let passWorkerPromise = null;
+  let passProgress = null; // колбэк прогресса текущего сканирования
+  function getPassWorker() {
+    if (!passWorkerPromise) {
+      const base = new URL('vendor/tesseract/', location.href).href;
+      passWorkerPromise = Tesseract.createWorker('eng', 1, {
+        workerPath: base + 'worker.min.js',
+        corePath: base,
+        langPath: base.replace(/\/$/, ''),
+        gzip: true,
+        logger: (msg) => { if (passProgress) passProgress(msg); },
+      }).then(async (w) => {
+        await w.setParameters({
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<',
+          tessedit_pageseg_mode: '6',
+        });
+        return w;
+      });
+      passWorkerPromise.catch(() => { passWorkerPromise = null; });
+    }
+    return passWorkerPromise;
+  }
+
+  const fileToImage = (file) => new Promise((res, rej) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); res(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('bad image')); };
+    img.src = url;
+  });
+
+  function cropToCanvas(img, fromY, height) {
+    const sw = img.naturalWidth, sh = img.naturalHeight;
+    const sy = Math.floor(sh * fromY), sHeight = Math.ceil(sh * height);
+    const outW = Math.round(Math.min(2000, Math.max(1000, sw)));
+    const c = document.createElement('canvas');
+    c.width = outW; c.height = Math.round(sHeight * outW / sw);
+    c.getContext('2d').drawImage(img, 0, sy, sw, sHeight, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  async function recognizePassport(file) {
+    if (typeof Tesseract === 'undefined') throw new Error('Модуль распознавания не загружен');
+    const worker = await getPassWorker();
+    const img = await fileToImage(file);
+    // МЧЗ — внизу страницы: сперва нижняя часть кадра, затем весь кадр.
+    // Если из кадра прочиталась только вторая строка (без ФИО) — пробуем следующий.
+    let best = null;
+    for (const [fromY, height] of [[0.5, 0.5], [0, 1]]) {
+      const { data } = await worker.recognize(cropToCanvas(img, fromY, height));
+      const parsed = parseMRZ(data.text || '');
+      if (parsed && (!best || (parsed.lastName && !best.lastName))) best = parsed;
+      if (best && best.lastName) break;
+    }
+    return best;
+  }
+
   function openRentForm(t) {
     const clients = clientsIndex();
     const names = Object.values(clients).map(c => c.name).sort((a, b) => a.localeCompare(b, 'ru'));
@@ -767,6 +891,11 @@
         </div>
         <details class="pass-details">
           <summary>${icon('user')} Паспортные данные (РФ)</summary>
+          <div class="field">
+            <button type="button" class="btn btn--outline btn--sm btn--block" id="passScanBtn">${icon('camera')} Распознать по фото паспорта</button>
+            <input type="file" id="passScanFile" accept="image/*" hidden>
+            <div class="hint">Сфотографируйте разворот с фото так, чтобы были видны две строки символов внизу.</div>
+          </div>
           <div class="field-row">
             ${field('Серия и номер', `<input name="passSeries" inputmode="numeric" placeholder="1234 567890">`)}
             ${field('Дата выдачи', `<input name="passIssuedAt" type="date">`)}
@@ -790,6 +919,42 @@
     // Маски: серия/номер «#### ######», код подразделения «###-###»
     el('passSeries').addEventListener('input', (e) => { e.target.value = fmtPassSeries(e.target.value); });
     el('passDeptCode').addEventListener('input', (e) => { e.target.value = fmtDeptCode(e.target.value); });
+
+    // Распознавание паспорта по фото (МЧЗ)
+    const scanBtn = form.querySelector('#passScanBtn');
+    const scanFile = form.querySelector('#passScanFile');
+    const scanLabel = scanBtn.innerHTML;
+    scanBtn.addEventListener('click', () => scanFile.click());
+    scanFile.addEventListener('change', async () => {
+      const file = scanFile.files[0];
+      scanFile.value = '';
+      if (!file) return;
+      scanBtn.disabled = true;
+      passProgress = (m) => {
+        if (m.status === 'recognizing text') scanBtn.textContent = `Распознаю… ${Math.round((m.progress || 0) * 100)}%`;
+        else scanBtn.textContent = 'Загрузка модуля…';
+      };
+      try {
+        const p = await recognizePassport(file);
+        if (!p) { toast('Не удалось прочитать МЧЗ — попробуйте более чёткое фото', 'err'); return; }
+        const fio = [p.lastName, p.firstName, p.midName].filter(Boolean).join(' ');
+        if (fio) el('renter').value = fio;
+        if (p.series.length === 4 && p.number) el('passSeries').value = p.series + ' ' + p.number;
+        if (p.issueDate) el('passIssuedAt').value = p.issueDate;
+        if (p.deptCode) el('passDeptCode').value = p.deptCode;
+        if (p.birthDate) el('birthDate').value = p.birthDate;
+        form.querySelector('.pass-details').open = true;
+        if (p.valid) toast('Паспорт распознан');
+        else toast('Распознано не полностью — проверьте данные', 'err');
+      } catch (err) {
+        console.error(err);
+        toast('Ошибка распознавания: ' + err.message, 'err');
+      } finally {
+        passProgress = null;
+        scanBtn.disabled = false;
+        scanBtn.innerHTML = scanLabel;
+      }
+    });
 
     // Автозаполнение по известному клиенту
     let lastFilled = '';
