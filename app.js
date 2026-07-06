@@ -782,12 +782,36 @@
       if (idx >= 0) { l2 = lines[idx]; l1 = idx > 0 ? lines[idx - 1] : ''; }
     }
     if (!l2) return null;
+    // Якоря: «PNRUS» в начале первой строки, «RUS» на позициях 11–13 второй —
+    // отрезаем мусор, попавший в строку слева от МЧЗ.
+    const a1 = l1.search(/P[NM]RU[S5]/);
+    if (a1 > 0) l1 = l1.slice(a1);
+    const a2 = l2.replace(/5/g, 'S').indexOf('RUS');
+    if (a2 >= 10) l2 = l2.slice(a2 - 10);
     l1 = l1.padEnd(44, '<'); l2 = l2.padEnd(44, '<');
-    const dig = (s) => s.replace(/O/g, '0').replace(/I/g, '1').replace(/B/g, '8');
+    try { window.__mrzLines = { l1, l2 }; } catch (e) {}
+    // Типовые путаницы OCR в цифровых полях
+    const dig = (s) => s.replace(/[OQ]/g, '0').replace(/[IL]/g, '1').replace(/B/g, '8')
+      .replace(/S/g, '5').replace(/Z/g, '2').replace(/G/g, '6');
     const docField = dig(l2.slice(0, 9));   // 3 первые цифры серии + номер
     const birth = dig(l2.slice(13, 19));
-    const personal = dig(l2.slice(28, 41)); // 4-я цифра серии + дата выдачи + код подразделения
     if (!/^\d{9}$/.test(docField) || !/^\d{6}$/.test(birth)) return null;
+    // Личное поле (4-я цифра серии + дата выдачи + код подразделения): позиции 29–42,
+    // но OCR может «съесть» заполнитель «<» и сдвинуть строку — поэтому пробуем и якорь:
+    // длинную цифровую последовательность после заполнителей. Выбираем вариант,
+    // где дата выдачи правдоподобна, а код подразделения цел.
+    const pCands = [dig(l2.slice(28, 41))];
+    const am = l2.slice(20).match(/<+([0-9OQILBSZG]{7,13})/);
+    if (am) pCands.push(dig(am[1]));
+    let personal = pCands[0], pBest = -1;
+    for (const p of pCands) {
+      const is = p.slice(1, 7), mm = +is.slice(2, 4), dd = +is.slice(4, 6);
+      let score = 0;
+      if (/^\d/.test(p)) score += 1;
+      if (/^\d{6}$/.test(is) && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) score += 2;
+      if (/^\d{6}$/.test(p.slice(7, 13))) score += 1;
+      if (score > pBest) { pBest = score; personal = p; }
+    }
     const valid = mrzCheck(l2.slice(0, 9)) === +dig(l2[9]) && mrzCheck(l2.slice(13, 19)) === +dig(l2[19]);
     let lastName = '', firstName = '', midName = '';
     const m = l1.match(/^P[A-Z<][A-Z<]{3}(.+)$/);
@@ -823,7 +847,8 @@
   function getPassWorker() {
     if (!passWorkerPromise) {
       const base = new URL('vendor/tesseract/', location.href).href;
-      passWorkerPromise = Tesseract.createWorker('eng', 1, {
+      // ocrb — модель, обученная на шрифте OCR-B (им печатается МЧЗ); eng — подстраховка
+      passWorkerPromise = Tesseract.createWorker('ocrb+eng', 1, {
         workerPath: base + 'worker.min.js',
         corePath: base,
         langPath: base.replace(/\/$/, ''),
@@ -833,6 +858,7 @@
         await w.setParameters({
           tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<',
           tessedit_pageseg_mode: '6',
+          user_defined_dpi: '300',
         });
         return w;
       });
@@ -849,28 +875,215 @@
     img.src = url;
   });
 
-  function cropToCanvas(img, fromY, height) {
+  // Кадр для OCR: вырезка + масштаб + серый с растяжкой контраста;
+  // mode 'bin' — дополнительно адаптивная бинаризация (убирает узор и водяные знаки).
+  function prepCanvas(img, fromY, height, mode, angleDeg) {
     const sw = img.naturalWidth, sh = img.naturalHeight;
+    const outW = Math.round(Math.min(2200, Math.max(1600, sw)));
     const sy = Math.floor(sh * fromY), sHeight = Math.ceil(sh * height);
-    const outW = Math.round(Math.min(2000, Math.max(1000, sw)));
     const c = document.createElement('canvas');
     c.width = outW; c.height = Math.round(sHeight * outW / sw);
-    c.getContext('2d').drawImage(img, 0, sy, sw, sHeight, 0, 0, c.width, c.height);
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    if (angleDeg) {
+      ctx.translate(c.width / 2, c.height / 2);
+      ctx.rotate(angleDeg * Math.PI / 180);
+      ctx.translate(-c.width / 2, -c.height / 2);
+    }
+    ctx.drawImage(img, 0, sy, sw, sHeight, 0, 0, c.width, c.height);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    const id = ctx.getImageData(0, 0, c.width, c.height);
+    const d = id.data, W = c.width, H = c.height, n = W * H;
+    const gray = new Uint8ClampedArray(n);
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < n; i++) {
+      const g = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8;
+      gray[i] = g; hist[g]++;
+    }
+    // Растяжка контраста по 2-му и 98-му перцентилям
+    let lo = 0, hi = 255, acc = 0;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.02) { lo = v; break; } }
+    acc = 0;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.98) { hi = v; break; } }
+    const range = Math.max(1, hi - lo);
+    for (let i = 0; i < n; i++) gray[i] = Math.max(0, Math.min(255, Math.round((gray[i] - lo) * 255 / range)));
+
+    if (mode === 'bin') {
+      // Локальный порог по среднему в окне (через интегральное изображение)
+      const integ = new Float64Array((W + 1) * (H + 1));
+      for (let y = 0; y < H; y++) {
+        let rowSum = 0;
+        for (let x = 0; x < W; x++) {
+          rowSum += gray[y * W + x];
+          integ[(y + 1) * (W + 1) + (x + 1)] = integ[y * (W + 1) + (x + 1)] + rowSum;
+        }
+      }
+      const win = Math.max(16, Math.round(W / 40));
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const x1 = Math.max(0, x - win), x2 = Math.min(W - 1, x + win);
+          const y1 = Math.max(0, y - win), y2 = Math.min(H - 1, y + win);
+          const area = (x2 - x1 + 1) * (y2 - y1 + 1);
+          const sum = integ[(y2 + 1) * (W + 1) + (x2 + 1)] - integ[y1 * (W + 1) + (x2 + 1)]
+                    - integ[(y2 + 1) * (W + 1) + x1] + integ[y1 * (W + 1) + x1];
+          const px = gray[y * W + x] < (sum / area) * 0.82 ? 0 : 255;
+          const o = (y * W + x) * 4;
+          d[o] = d[o + 1] = d[o + 2] = px;
+        }
+      }
+    } else {
+      for (let i = 0; i < n; i++) { const o = i * 4; d[o] = d[o + 1] = d[o + 2] = gray[i]; }
+    }
+    ctx.putImageData(id, 0, 0);
     return c;
+  }
+
+  // Поиск полосы МЧЗ на бинаризованном кадре: две плотные строки текста у низа.
+  function findMrzBand(binCanvas) {
+    const W = binCanvas.width, H = binCanvas.height;
+    const d = binCanvas.getContext('2d').getImageData(0, 0, W, H).data;
+    const step = 2, cols = Math.ceil(W / step);
+    const dens = new Float32Array(H);
+    for (let y = 0; y < H; y++) {
+      let c = 0;
+      for (let x = 0; x < W; x += step) if (d[(y * W + x) * 4] < 128) c++;
+      dens[y] = c / cols;
+    }
+    const sm = new Float32Array(H);
+    for (let y = 0; y < H; y++) {
+      let s = 0, k = 0;
+      for (let dy = -2; dy <= 2; dy++) { const yy = y + dy; if (yy >= 0 && yy < H) { s += dens[yy]; k++; } }
+      sm[y] = s / k;
+    }
+    let peak = 0;
+    for (let y = 0; y < H; y++) peak = Math.max(peak, sm[y]);
+    const thr = Math.max(0.05, peak * 0.4);
+    const runs = [];
+    let start = -1;
+    for (let y = 0; y <= H; y++) {
+      const on = y < H && sm[y] > thr;
+      if (on && start < 0) start = y;
+      if (!on && start >= 0) { if (y - start >= 3) runs.push([start, y - 1]); start = -1; }
+    }
+    if (!runs.length) return null;
+    const last = runs[runs.length - 1];
+    let y1 = last[0];
+    const y2 = last[1];
+    const lh = y2 - y1 + 1;
+    const prev = runs[runs.length - 2];
+    if (prev && (y1 - prev[1]) < lh * 2.5) y1 = prev[0]; // вторая строка МЧЗ рядом сверху
+    if ((y2 - y1) < H * 0.02 || (y2 - y1) > H * 0.3) return null; // неправдоподобная высота
+    return { y1, y2, peak }; // peak — метрика «горизонтальности» строк (для выравнивания)
+  }
+
+  // Вырезаем найденную полосу с запасом и укрупняем — OCR читает крупный текст надёжнее
+  function zoomBand(srcCanvas, band) {
+    const pad = Math.round((band.y2 - band.y1) * 0.35) + 4;
+    const y1 = Math.max(0, band.y1 - pad), y2 = Math.min(srcCanvas.height, band.y2 + pad);
+    const h = y2 - y1;
+    const scale = Math.min(2.5, 2600 / srcCanvas.width);
+    const c = document.createElement('canvas');
+    c.width = Math.round(srcCanvas.width * scale);
+    c.height = Math.round(h * scale);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(srcCanvas, 0, y1, srcCanvas.width, h, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  // Слияние результатов разных проходов: приоритет — валидным контрольным цифрам,
+  // пустые поля добираем из другого прохода.
+  function mergeParsed(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    const [p, s] = (b.valid && !a.valid) ? [b, a] : [a, b];
+    const out = { ...p };
+    for (const k of ['lastName', 'firstName', 'midName', 'series', 'number', 'birthDate', 'issueDate', 'deptCode']) {
+      if (!out[k]) out[k] = s[k];
+    }
+    if ((out.series || '').length < 4 && (s.series || '').length === 4) out.series = s.series;
+    out.valid = a.valid || b.valid;
+    return out;
   }
 
   async function recognizePassport(file) {
     if (typeof Tesseract === 'undefined') throw new Error('Модуль распознавания не загружен');
     const worker = await getPassWorker();
     const img = await fileToImage(file);
-    // МЧЗ — внизу страницы: сперва нижняя часть кадра, затем весь кадр.
-    // Если из кадра прочиталась только вторая строка (без ФИО) — пробуем следующий.
+    // Поиск полосы МЧЗ на разных углах поворота (лечит заваленные кадры).
+    // Прямой кадр (угол 0) всегда остаётся в попытках — метрика угла может ошибаться.
+    const cands = [];
+    for (const a of [0, -2, 2, -4, 4, -6, 6]) {
+      const info = findMrzBand(prepCanvas(img, 0.5, 0.5, 'bin', a));
+      if (info) cands.push({ angle: a, peak: info.peak, band: info });
+    }
+    cands.sort((x, y) => y.peak - x.peak);
+    const picks = [];
+    if (cands[0]) picks.push(cands[0]);
+    const zeroCand = cands.find(c => c.angle === 0);
+    if (zeroCand && cands[0] !== zeroCand) picks.push(zeroCand);
+    try { window.__mrzDebug = { angles: cands.map(c => [c.angle, +c.peak.toFixed(3)]) }; } catch (e) {}
+    // Прицельные попытки (укрупнённая полоса; лучшая — построчно в режиме
+    // «одна строка», он надёжнее дочитывает хвост), затем запасные кадры целиком.
+    const ocr = async (canvas) => {
+      if (window.__dbgCanvas) {
+        try { (window.__mrzShots = window.__mrzShots || []).push(canvas.toDataURL('image/png')); } catch (e) {}
+      }
+      return (await worker.recognize(canvas)).data.text || '';
+    };
+    const ocrLines = async (canvas) => {
+      // режем полосу пополам и читаем каждую строку отдельно (PSM 7)
+      await worker.setParameters({ tessedit_pageseg_mode: '7' });
+      const half = (sy, sh2) => {
+        const h = document.createElement('canvas');
+        h.width = canvas.width; h.height = sh2;
+        h.getContext('2d').drawImage(canvas, 0, sy, canvas.width, sh2, 0, 0, canvas.width, sh2);
+        return h;
+      };
+      const mid = Math.round(canvas.height / 2);
+      const t1 = await ocr(half(0, mid));
+      const t2 = await ocr(half(mid, canvas.height - mid));
+      await worker.setParameters({ tessedit_pageseg_mode: '6' });
+      return t1.trim() + '\n' + t2.trim();
+    };
+    const attempts = [];
+    for (const p of picks) {
+      const mk = (mode) => zoomBand(prepCanvas(img, 0.5, 0.5, mode, p.angle), p.band);
+      if (p === picks[0]) attempts.push(() => ocrLines(mk('bin')), () => ocrLines(mk('gray')));
+      attempts.push(() => ocr(mk('bin')), () => ocr(mk('gray')));
+    }
+    attempts.push(
+      () => ocr(prepCanvas(img, 0.5, 0.5, 'bin', 0)),
+      () => ocr(prepCanvas(img, 0.5, 0.5, 'gray', 0)),
+      () => ocr(prepCanvas(img, 0, 1, 'bin', 0)),
+      () => ocr(prepCanvas(img, 0, 1, 'gray', 0)),
+    );
+    // ФИО подтверждаем голосованием проходов: одиночный проход может принять
+    // заполнитель «<» за букву — ждём, пока два прохода сойдутся на одном варианте.
     let best = null;
-    for (const [fromY, height] of [[0.5, 0.5], [0, 1]]) {
-      const { data } = await worker.recognize(cropToCanvas(img, fromY, height));
-      const parsed = parseMRZ(data.text || '');
-      if (parsed && (!best || (parsed.lastName && !best.lastName))) best = parsed;
-      if (best && best.lastName) break;
+    const votes = { lastName: {}, firstName: {}, midName: {} };
+    const top = (k) => Object.entries(votes[k]).sort((a, b) => b[1] - a[1])[0] || null;
+    const confirmed = (k) => { const t = top(k); return !t || t[1] >= 2; }; // нет вариантов — тоже «решено»
+    for (let i = 0; i < attempts.length; i++) {
+      if (passProgress) passProgress({ status: 'attempt', attempt: i + 1, total: attempts.length });
+      const parsed = parseMRZ(await attempts[i]());
+      console.debug('MRZ pass', i + 1, JSON.stringify(parsed));
+      if (parsed) for (const k of Object.keys(votes)) {
+        // голос прохода с сошедшимися контрольными цифрами весит вдвое больше
+        if (parsed[k]) votes[k][parsed[k]] = (votes[k][parsed[k]] || 0) + (parsed.valid ? 2 : 1);
+      }
+      best = mergeParsed(best, parsed);
+      if (best && best.valid && best.issueDate && best.deptCode
+          && top('lastName') && top('lastName')[1] >= 2
+          && confirmed('firstName') && confirmed('midName')) break;
+    }
+    if (best) for (const k of Object.keys(votes)) {
+      const t = top(k);
+      if (t) best[k] = t[0]; // самый частый вариант каждой части ФИО
     }
     return best;
   }
@@ -930,9 +1143,16 @@
       scanFile.value = '';
       if (!file) return;
       scanBtn.disabled = true;
+      let attempt = 0, attempts = 0;
       passProgress = (m) => {
-        if (m.status === 'recognizing text') scanBtn.textContent = `Распознаю… ${Math.round((m.progress || 0) * 100)}%`;
-        else scanBtn.textContent = 'Загрузка модуля…';
+        if (m.status === 'attempt') {
+          attempt = m.attempt; attempts = m.total;
+          scanBtn.textContent = `Распознаю… проход ${attempt}/${attempts}`;
+        } else if (m.status === 'recognizing text') {
+          scanBtn.textContent = `Распознаю… проход ${attempt || 1}${attempts ? '/' + attempts : ''} · ${Math.round((m.progress || 0) * 100)}%`;
+        } else if (!attempt) {
+          scanBtn.textContent = 'Загрузка модуля…';
+        }
       };
       try {
         const p = await recognizePassport(file);
