@@ -186,6 +186,14 @@ body { background: var(--gray-light); padding-bottom: 90px; }
 .field .hint { font-size: .78rem; color: var(--text-dim); font-weight: 500; margin-top: 4px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
+/* Сворачиваемый блок паспортных данных в форме выдачи */
+.pass-details { border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; margin-bottom: 14px; background: var(--gray-light); }
+.pass-details summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; font-size: .85rem; font-weight: 700; padding: 10px 0; color: var(--text); user-select: none; }
+.pass-details summary::-webkit-details-marker { display: none; }
+.pass-details summary::after { content: '▾'; margin-left: auto; color: var(--text-dim); transition: transform .2s; }
+.pass-details[open] summary::after { transform: rotate(180deg); }
+.pass-details[open] { padding-bottom: 4px; }
+
 /* ---------- Сканер ---------- */
 #reader { width: 100%; border-radius: var(--radius); overflow: hidden; }
 .scan-hint { text-align: center; color: var(--text-dim); margin: 14px 0; font-weight: 600; }

@@ -506,6 +506,10 @@
             <dl class="kv">
               <dt>Арендатор</dt><dd>${esc(cur.renter)}</dd>
               <dt>Телефон</dt><dd>${esc(cur.phone || '—')}</dd>
+              ${cur.passport?.series ? `<dt>Паспорт</dt><dd>${esc(cur.passport.series)}${cur.passport.issuedAt ? ', выдан ' + fmtDate(cur.passport.issuedAt) : ''}${cur.passport.deptCode ? ' (' + esc(cur.passport.deptCode) + ')' : ''}</dd>` : ''}
+              ${cur.passport?.issuedBy ? `<dt>Кем выдан</dt><dd>${esc(cur.passport.issuedBy)}</dd>` : ''}
+              ${cur.passport?.birthDate ? `<dt>Дата рождения</dt><dd>${fmtDate(cur.passport.birthDate)}</dd>` : ''}
+              ${cur.passport?.regAddress ? `<dt>Регистрация</dt><dd>${esc(cur.passport.regAddress)}</dd>` : ''}
               <dt>Объект</dt><dd>${esc(cur.site || '—')}</dd>
               <dt>Выдан</dt><dd>${fmtDateTime(cur.takenAt)}</dd>
               <dt>Вернуть до</dt><dd style="${isOverdue(t) ? 'color:#dc2626;font-weight:800' : ''}">${fmtDate(cur.dueAt)}</dd>
@@ -587,6 +591,7 @@
       <li${!r.returnedAt ? ' style="border-color:var(--orange)"' : ''}>
         <div class="timeline__date">${fmtDateTime(r.takenAt)} ${r.returnedAt ? '→ ' + fmtDateTime(r.returnedAt) : '· <b style="color:var(--orange)">не возвращён</b>'}</div>
         <div class="timeline__title">${icon('user')} ${esc(r.renter)}${r.phone ? ' · ' + esc(r.phone) : ''}</div>
+        ${r.passport?.series ? `<div class="timeline__sub">Паспорт: ${esc(r.passport.series)}</div>` : ''}
         ${r.site ? `<div class="timeline__sub">Объект: ${esc(r.site)}</div>` : ''}
         ${r.note ? `<div class="timeline__sub">${esc(r.note)}</div>` : ''}
       </li>`).join('')}</ul>`;
@@ -718,22 +723,93 @@
     });
   }
 
+  // База клиентов из истории аренд: имя → последние известные телефон и паспорт.
+  // Используется для автозаполнения формы выдачи.
+  const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  function clientsIndex() {
+    const rentals = [];
+    store.tools().forEach(t => (t.rentals || []).forEach(r => {
+      if ((r.renter || '').trim()) rentals.push(r);
+    }));
+    rentals.sort((a, b) => (a.takenAt || '').localeCompare(b.takenAt || ''));
+    const map = {};
+    rentals.forEach(r => {
+      const name = r.renter.trim();
+      const c = map[normName(name)] || (map[normName(name)] = {});
+      c.name = name;
+      if (r.phone) c.phone = r.phone;
+      if (r.passport && Object.values(r.passport).some(v => v)) c.passport = r.passport;
+    });
+    return map;
+  }
+  const fmtPassSeries = (v) => {
+    const d = String(v || '').replace(/\D/g, '').slice(0, 10);
+    return d.length > 4 ? d.slice(0, 4) + ' ' + d.slice(4) : d;
+  };
+  const fmtDeptCode = (v) => {
+    const d = String(v || '').replace(/\D/g, '').slice(0, 6);
+    return d.length > 3 ? d.slice(0, 3) + '-' + d.slice(3) : d;
+  };
+
   function openRentForm(t) {
+    const clients = clientsIndex();
+    const names = Object.values(clients).map(c => c.name).sort((a, b) => a.localeCompare(b, 'ru'));
     modal.open(`
       <h2>Выдать в аренду</h2>
       <p class="tool-card__cat" style="margin-top:-10px">${esc(t.name)}</p>
       <form id="rentForm">
-        ${field('Арендатор *', `<input name="renter" required placeholder="Иван Петров / ООО Стройка">`)}
+        ${field('Арендатор *', `<input name="renter" required list="renterList" autocomplete="off" placeholder="Иван Петров / ООО Стройка">`,
+          names.length ? 'Начните вводить — знакомый клиент подставится вместе с паспортом.' : '')}
+        <datalist id="renterList">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
         <div class="field-row">
           ${field('Телефон', `<input name="phone" type="tel" placeholder="+7 …">`)}
           ${field('Вернуть до', `<input name="dueAt" type="date" value="${todayInput()}">`)}
         </div>
+        <details class="pass-details">
+          <summary>${icon('user')} Паспортные данные (РФ)</summary>
+          <div class="field-row">
+            ${field('Серия и номер', `<input name="passSeries" inputmode="numeric" placeholder="1234 567890">`)}
+            ${field('Дата выдачи', `<input name="passIssuedAt" type="date">`)}
+          </div>
+          ${field('Кем выдан', `<input name="passIssuedBy" placeholder="ГУ МВД России по Тюменской области">`)}
+          <div class="field-row">
+            ${field('Код подразделения', `<input name="passDeptCode" inputmode="numeric" placeholder="720-001">`)}
+            ${field('Дата рождения', `<input name="birthDate" type="date">`)}
+          </div>
+          ${field('Адрес регистрации', `<input name="regAddress" placeholder="г. Тюмень, ул. …">`)}
+        </details>
         ${field('Объект / адрес', `<input name="site" placeholder="ЖК Северный, корп. 3">`)}
         ${field('Примечание', `<textarea name="note" rows="2" placeholder="Залог, комплект…"></textarea>`)}
         <button class="btn btn--primary btn--block" type="submit">${icon('handout')} Выдать</button>
       </form>
     `);
-    $('#rentForm').addEventListener('submit', (e) => {
+
+    const form = $('#rentForm');
+    const el = (n) => form.querySelector(`[name=${n}]`);
+
+    // Маски: серия/номер «#### ######», код подразделения «###-###»
+    el('passSeries').addEventListener('input', (e) => { e.target.value = fmtPassSeries(e.target.value); });
+    el('passDeptCode').addEventListener('input', (e) => { e.target.value = fmtDeptCode(e.target.value); });
+
+    // Автозаполнение по известному клиенту
+    let lastFilled = '';
+    const tryFill = () => {
+      const k = normName(el('renter').value);
+      const c = clients[k];
+      if (!c || k === lastFilled) return;
+      lastFilled = k;
+      const set = (n, v) => { if (v) el(n).value = v; };
+      set('phone', c.phone);
+      const p = c.passport || {};
+      set('passSeries', p.series); set('passIssuedAt', p.issuedAt); set('passIssuedBy', p.issuedBy);
+      set('passDeptCode', p.deptCode); set('birthDate', p.birthDate); set('regAddress', p.regAddress);
+      if (c.passport) form.querySelector('.pass-details').open = true;
+      toast('Данные клиента подставлены из истории');
+    };
+    el('renter').addEventListener('input', tryFill);
+    el('renter').addEventListener('change', tryFill);
+
+    form.addEventListener('submit', (e) => {
       e.preventDefault();
       const f = new FormData(e.target);
       const renter = f.get('renter').trim(); if (!renter) return;
@@ -741,6 +817,12 @@
         id: rid(), renter, phone: f.get('phone').trim(), site: f.get('site').trim(),
         dueAt: f.get('dueAt'), note: f.get('note').trim(), takenAt: nowISO(), returnedAt: null,
       };
+      const passport = {
+        series: f.get('passSeries').trim(), issuedAt: f.get('passIssuedAt'),
+        issuedBy: f.get('passIssuedBy').trim(), deptCode: f.get('passDeptCode').trim(),
+        birthDate: f.get('birthDate'), regAddress: f.get('regAddress').trim(),
+      };
+      if (Object.values(passport).some(v => v)) rental.passport = passport;
       t.rentals = t.rentals || []; t.rentals.push(rental);
       store.update(t.id, { status: 'rented', rentals: t.rentals });
       modal.close(); toast('Выдано в аренду'); router();
