@@ -43,7 +43,7 @@ function isoDate(s: string | null): string | null {
 function extractIssuedBy(fullText: string): string | null {
   const lines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
   const cyr = (s: string) => s.replace(/[^а-яёА-ЯЁ]/g, "").length;
-  const KEY = /(УМВД|ГУ\s?МВД|МВД|УВД|ГУВД|УФМС|ОУФМС|ФМС|ОВД|РОВД|ПОЛИЦИ|МИЛИЦИ|ОТДЕЛ|МИГРАЦ|КОНСУЛ|ПОСОЛЬСТ)/i;
+  const KEY = /(УМВД|ГУ\s?МВД|МВД|УВД|ГУВД|УФМС|ОУФМС|ФМС|ОВД|РОВД|ПОЛИЦИ|МИЛИЦИ|ОТДЕЛ|МИГРАЦ|КОНСУЛ|ПОСОЛЬСТ|ВНУТРЕННИХ\s+ДЕЛ|ПАСПОРТНО)/i;
   const BOUND = /дата\s*выдачи|код\s*подразделения|личн(ый|ая)|подпись|фамилия|^имя\b|отчество|место\s*рожд|дата\s*рожд|^пол\b/i;
   const junk = (line: string) =>
     cyr(line) < 4 ||                                        // «41», «990553»
@@ -179,12 +179,32 @@ function parseRegistration(fullText: string) {
   // и берём тот, где полей собралось больше.
   const start = rawLines.findIndex((l) => /зарегистрирован/i.test(l));
   const sliced = start >= 0 ? rawLines.slice(start) : rawLines;
-  const a = parseRegistrationLines(sliced);
+  let best = parseRegistrationLines(sliced);
   if (start > 0) {
     const b = parseRegistrationLines(rawLines);
-    if (b.found > a.found) return { reg_address: b.reg_address, confidence: b.confidence };
+    if (b.found > best.found) best = b;
   }
-  return { reg_address: a.reg_address, confidence: a.confidence };
+  if (best.found >= 2) return { reg_address: best.reg_address, confidence: best.confidence };
+
+  // Городские штампы без меток: «ЗАРЕГИСТРИРОВАН по адресу: г. Москва, ул. …»
+  const cyr = (s: string) => s.replace(/[^а-яёА-ЯЁ]/g, "").length;
+  const ai = rawLines.findIndex((l) => /по\s+адресу/i.test(l));
+  if (ai !== -1) {
+    const first = rawLines[ai].replace(/^[\s\S]*?по\s+адресу[:\s]*/i, "").trim();
+    const parts: string[] = first ? [first] : [];
+    for (let i = ai + 1; i < rawLines.length && parts.length < 4; i++) {
+      const l = rawLines[i];
+      if (/отдел|мвд|уфмс|фмс|полиц|подпись|фамилия|зарегистрирован/i.test(l)) break;
+      if (/^\d{2}\.\d{2}\.\d{4}/.test(l)) break;
+      if (cyr(l) < 3 && !/\d/.test(l)) continue;
+      parts.push(l);
+    }
+    const addr = parts.join(", ").replace(/\s+/g, " ").replace(/,\s*,/g, ",").trim();
+    if (addr.length >= 8) {
+      return { reg_address: addr, confidence: "medium" };
+    }
+  }
+  return { reg_address: best.reg_address, confidence: best.confidence };
 }
 
 function parseRegistrationLines(lines: string[]) {
