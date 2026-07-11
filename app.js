@@ -1010,6 +1010,41 @@
     return out;
   }
 
+  // Облачное распознавание: фото → Edge Function → нейросеть с компьютерным зрением.
+  // Читает всю страницу (включая «Кем выдан» и место рождения), а не только МЧЗ.
+  async function recognizePassportCloud(file) {
+    const url = window.APP_CONFIG && window.APP_CONFIG.CLOUD_OCR_URL;
+    if (!url || !navigator.onLine) return null;
+    const img = await fileToImage(file);
+    // ужимаем до 1600px по длинной стороне — достаточно для чтения, быстро грузится
+    const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * scale);
+    c.height = Math.round(img.naturalHeight * scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const dataUrl = c.toDataURL('image/jpeg', 0.85);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000);
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': window.APP_CONFIG.SUPABASE_ANON_KEY || '',
+        },
+        body: JSON.stringify({ image: dataUrl.split(',')[1], media_type: 'image/jpeg' }),
+        signal: controller.signal,
+      });
+      if (!resp.ok) throw new Error('облако недоступно (' + resp.status + ')');
+      const payload = await resp.json();
+      if (payload.error) throw new Error(payload.error);
+      return payload.data || null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function recognizePassport(file) {
     if (typeof Tesseract === 'undefined') throw new Error('Модуль распознавания не загружен');
     const worker = await getPassWorker();
@@ -1155,6 +1190,30 @@
         }
       };
       try {
+        // 1) Облако: нейросеть читает всю страницу, включая «Кем выдан»
+        let cloudOk = false;
+        try {
+          scanBtn.textContent = 'Распознаю в облаке…';
+          const c = await recognizePassportCloud(file);
+          if (c && (c.last_name || c.series)) {
+            const fio = [c.last_name, c.first_name, c.middle_name].filter(Boolean).join(' ');
+            if (fio) el('renter').value = fio;
+            if (c.series && c.number) el('passSeries').value = fmtPassSeries(c.series + c.number);
+            if (c.issue_date) el('passIssuedAt').value = c.issue_date;
+            if (c.issued_by) el('passIssuedBy').value = c.issued_by;
+            if (c.dept_code) el('passDeptCode').value = fmtDeptCode(c.dept_code);
+            if (c.birth_date) el('birthDate').value = c.birth_date;
+            form.querySelector('.pass-details').open = true;
+            cloudOk = true;
+            if (c.confidence === 'high') toast('Паспорт распознан');
+            else toast('Распознано — проверьте данные (фото не идеальное)', 'err');
+          }
+        } catch (cloudErr) {
+          console.warn('Облачное распознавание не сработало, локальный запасной вариант:', cloudErr);
+        }
+        if (cloudOk) return;
+
+        // 2) Запасной вариант: локальный OCR по МЧЗ (работает офлайн)
         const p = await recognizePassport(file);
         if (!p) { toast('Не удалось прочитать МЧЗ — попробуйте более чёткое фото', 'err'); return; }
         const fio = [p.lastName, p.firstName, p.midName].filter(Boolean).join(' ');

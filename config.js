@@ -9,4 +9,7 @@
 window.APP_CONFIG = {
   SUPABASE_URL: 'https://ffkeubeudfqeuehwbbpe.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_fiqwgj26OG_BcV-S3gA2Tg_XT3cRMJf',
+  // Облачное распознавание паспорта (Supabase Edge Function → Claude API).
+  // Пустая строка = выключено, работает только локальный OCR.
+  CLOUD_OCR_URL: 'https://ffkeubeudfqeuehwbbpe.supabase.co/functions/v1/passport-ocr',
 };
