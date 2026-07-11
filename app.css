@@ -186,6 +186,18 @@ body { background: var(--gray-light); padding-bottom: 90px; }
 .field .hint { font-size: .78rem; color: var(--text-dim); font-weight: 500; margin-top: 4px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
+/* Кнопка менеджера в шапке */
+.user-btn { display: inline-flex; align-items: center; gap: 6px; background: none; border: 1px solid var(--line-dark); color: var(--text-on-dark); border-radius: 999px; padding: 6px 12px; cursor: pointer; font: 600 .85rem Manrope, sans-serif; transition: border-color .2s, color .2s; max-width: 140px; }
+.user-btn:hover { border-color: var(--orange); color: var(--orange); }
+.user-btn.is-admin { border-color: var(--orange); color: var(--orange); }
+.user-btn #userBtnName { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 560px) { .user-btn #userBtnName { display: none; } .user-btn { padding: 6px 8px; } }
+
+/* Блок режима в модалке менеджера */
+.role-box { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 14px; }
+.role-box__row { display: flex; justify-content: space-between; align-items: center; font-size: .9rem; margin-bottom: 10px; color: var(--text-dim); }
+.role-box__row b { color: var(--text); }
+
 /* Сворачиваемый блок паспортных данных в форме выдачи */
 .pass-details { border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; margin-bottom: 14px; background: var(--gray-light); }
 .pass-details summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; font-size: .85rem; font-weight: 700; padding: 10px 0; color: var(--text); user-select: none; }

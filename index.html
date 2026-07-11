@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#1a1d22" id="themeColor">
   <title>АрендаСтрой · Инструмент</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="logo.svg?v=20" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=20">
+  <link rel="icon" href="logo.svg?v=21" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=21">
   <script>
     // Применяем сохранённую тему сразу, до отрисовки — чтобы не было мигания
     try { var _t = localStorage.getItem('theme'); if (_t === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}
   </script>
-  <link rel="stylesheet" href="theme.css?v=20">
-  <link rel="stylesheet" href="app.css?v=20">
+  <link rel="stylesheet" href="theme.css?v=21">
+  <link rel="stylesheet" href="app.css?v=21">
 </head>
 <body>
   <!-- Шапка -->
@@ -28,6 +28,10 @@
       <nav class="app-nav">
         <span class="sync-status" id="syncStatus" title="Состояние синхронизации"></span>
         <a href="#/" class="app-nav__link" data-nav="catalog">Каталог</a>
+        <button class="user-btn" id="userBtn" title="Менеджер и режим" aria-label="Менеджер и режим">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span id="userBtnName"></span>
+        </button>
         <button class="theme-toggle" id="themeToggle" title="Тёмная / светлая тема" aria-label="Переключить тему"></button>
         <button class="btn btn--primary btn--sm" id="navScan">
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M4 12h16"/></svg>
@@ -58,12 +62,12 @@
   <div class="toast-wrap" id="toastWrap"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=20"></script>
+  <script src="config.js?v=21"></script>
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/html5-qrcode.min.js"></script>
   <script src="vendor/tesseract/tesseract.min.js"></script>
-  <script src="catalog-data.js?v=20"></script>
-  <script src="app.js?v=20"></script>
+  <script src="catalog-data.js?v=21"></script>
+  <script src="app.js?v=21"></script>
   <script>
     // Убираем любой ранее установленный service worker и его кэш — чтобы устройства
     // всегда получали свежую версию (раньше из-за кэша подгружалась старая).

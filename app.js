@@ -35,7 +35,9 @@
       if (!Array.isArray(this.data.tools)) this.data.tools = [];
     },
     save() { localStorage.setItem(KEY, JSON.stringify(this.data)); },
-    tools() { return this.data.tools; },
+    // Служебные документы (например «_settings» с PIN администратора) живут
+    // в той же таблице, но в каталоге не показываются
+    tools() { return this.data.tools.filter(t => t.id !== '_settings'); },
     get(id) { return this.data.tools.find(t => t.id === id); },
     add(tool) { this.data.tools.unshift(tool); this.save(); if (!this.muted) sync.push(tool); },
     update(id, patch) {
@@ -127,6 +129,36 @@
   const rid = () => Math.random().toString(36).slice(2, 9);
   const nowISO = () => new Date().toISOString();
   const todayInput = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+  // ---------- Роли: менеджер (по умолчанию) и администратор ----------
+  // Менеджер: каталог, сканер, выдача, возврат, ТО, фото, аналитика.
+  // Администратор (вход по PIN): + добавление/правка/удаление инструмента,
+  // копии, инвентарные номера, наклейки, ручная смена статуса.
+  // PIN хранится в общей облачной базе (документ «_settings») — один на всех.
+  // Имя менеджера хранится на устройстве и подписывает выдачи/возвраты/ТО.
+  const ROLE_KEY = 'arenda-role';
+  const NAME_KEY = 'arenda-manager';
+  const isAdmin = () => localStorage.getItem(ROLE_KEY) === 'admin';
+  const managerName = () => (localStorage.getItem(NAME_KEY) || '').trim();
+  const settingsDoc = () => store.data.tools.find(t => t.id === '_settings');
+  const getAdminPin = () => { const s = settingsDoc(); return (s && s.adminPin) || ''; };
+  function saveAdminPin(pin) {
+    if (settingsDoc()) {
+      store.update('_settings', { adminPin: pin });
+    } else {
+      const doc = { id: '_settings', adminPin: pin, createdAt: nowISO() };
+      store.data.tools.push(doc); store.save(); sync.push(doc);
+    }
+  }
+  function updateUserBtn() {
+    const nameEl = document.getElementById('userBtnName');
+    const btn = document.getElementById('userBtn');
+    if (!nameEl || !btn) return;
+    const name = managerName();
+    nameEl.textContent = name ? name.split(' ')[0] : 'Кто вы?';
+    btn.classList.toggle('is-admin', isAdmin());
+    btn.title = (name || 'Представьтесь') + ' · режим: ' + (isAdmin() ? 'администратор' : 'менеджер');
+  }
 
   // ---------- Векторные иконки (единый линейный стиль) ----------
   const ICONS = {
@@ -319,9 +351,11 @@
         </div>
         <div class="head-actions">
           <a class="btn btn--outline" href="#/stats">${icon('chart')} Аналитика</a>
-          <button class="btn btn--outline" id="printLabels">${icon('tag')} Наклейки</button>
-          <button class="btn btn--outline" id="bulkInv">${icon('hash')} Инв. номера</button>
-          <button class="btn btn--primary" id="addTool">${icon('plus')} Добавить</button>
+          ${isAdmin() ? `
+            <button class="btn btn--outline" id="printLabels">${icon('tag')} Наклейки</button>
+            <button class="btn btn--outline" id="bulkInv">${icon('hash')} Инв. номера</button>
+            <button class="btn btn--primary" id="addTool">${icon('plus')} Добавить</button>
+          ` : ''}
         </div>
       </div>
 
@@ -349,9 +383,9 @@
       <div id="grid"></div>
     `;
 
-    $('#addTool').addEventListener('click', () => openToolForm());
-    $('#printLabels').addEventListener('click', () => printLabels(visibleTools()));
-    $('#bulkInv').addEventListener('click', () => openBulkInvForm());
+    if ($('#addTool')) $('#addTool').addEventListener('click', () => openToolForm());
+    if ($('#printLabels')) $('#printLabels').addEventListener('click', () => printLabels(visibleTools()));
+    if ($('#bulkInv')) $('#bulkInv').addEventListener('click', () => openBulkInvForm());
     $('#search').addEventListener('input', (e) => { filterState.q = e.target.value; renderGrid(); });
     $('#filters').addEventListener('click', (e) => {
       const btn = e.target.closest('[data-status]'); if (!btn) return;
@@ -477,9 +511,11 @@
                 ? `<button class="btn btn--primary" id="actReturn">${icon('inbox')} Принять возврат</button>`
                 : ''}
               <button class="btn btn--outline" id="actMaint">${icon('wrench')} Записать ТО</button>
-              <button class="btn btn--outline" id="actStatus">${icon('gear')} Статус</button>
-              <button class="btn btn--outline" id="actEdit">${icon('edit')} Изменить</button>
-              <button class="btn btn--outline" id="actCopies">${icon('copy')} Создать копии</button>
+              ${isAdmin() ? `
+                <button class="btn btn--outline" id="actStatus">${icon('gear')} Статус</button>
+                <button class="btn btn--outline" id="actEdit">${icon('edit')} Изменить</button>
+                <button class="btn btn--outline" id="actCopies">${icon('copy')} Создать копии</button>
+              ` : ''}
             </div>
           </div>
 
@@ -511,7 +547,7 @@
               ${cur.passport?.birthDate ? `<dt>Дата рождения</dt><dd>${fmtDate(cur.passport.birthDate)}</dd>` : ''}
               ${cur.passport?.regAddress ? `<dt>Регистрация</dt><dd>${esc(cur.passport.regAddress)}</dd>` : ''}
               <dt>Объект</dt><dd>${esc(cur.site || '—')}</dd>
-              <dt>Выдан</dt><dd>${fmtDateTime(cur.takenAt)}</dd>
+              <dt>Выдан</dt><dd>${fmtDateTime(cur.takenAt)}${cur.manager ? ' · ' + esc(cur.manager) : ''}</dd>
               <dt>Вернуть до</dt><dd style="${isOverdue(t) ? 'color:#dc2626;font-weight:800' : ''}">${fmtDate(cur.dueAt)}</dd>
             </dl>
           </div>` : ''}
@@ -526,9 +562,10 @@
             ${renderRentals(t)}
           </div>
 
+          ${isAdmin() ? `
           <div class="panel">
             <button class="btn btn--outline btn--sm" id="actDelete" style="color:#dc2626;border-color:#f3c2c2">${icon('trash')} Удалить инструмент</button>
-          </div>
+          </div>` : ''}
         </div>
       </div>
     `;
@@ -546,9 +583,9 @@
     if ($('#actRent')) $('#actRent').addEventListener('click', () => openRentForm(t));
     if ($('#actReturn')) $('#actReturn').addEventListener('click', () => openReturnForm(t));
     $('#actMaint').addEventListener('click', () => openMaintForm(t));
-    $('#actStatus').addEventListener('click', () => openStatusForm(t));
-    $('#actEdit').addEventListener('click', () => openToolForm(t));
-    $('#actCopies').addEventListener('click', () => openCopiesForm(t));
+    if ($('#actStatus')) $('#actStatus').addEventListener('click', () => openStatusForm(t));
+    if ($('#actEdit')) $('#actEdit').addEventListener('click', () => openToolForm(t));
+    if ($('#actCopies')) $('#actCopies').addEventListener('click', () => openCopiesForm(t));
 
     // Фото: загрузка/замена/удаление
     $('#photoBtn').addEventListener('click', () => $('#photoInput').click());
@@ -565,7 +602,7 @@
       store.update(t.id, { photo: '' }); toast('Фото убрано'); router();
     });
 
-    $('#actDelete').addEventListener('click', () => {
+    if ($('#actDelete')) $('#actDelete').addEventListener('click', () => {
       if (confirm(`Удалить «${t.name}» вместе со всей историей? Действие необратимо.`)) {
         store.remove(t.id); toast('Инструмент удалён'); location.hash = '#/';
       }
@@ -592,6 +629,7 @@
         <div class="timeline__date">${fmtDateTime(r.takenAt)} ${r.returnedAt ? '→ ' + fmtDateTime(r.returnedAt) : '· <b style="color:var(--orange)">не возвращён</b>'}</div>
         <div class="timeline__title">${icon('user')} ${esc(r.renter)}${r.phone ? ' · ' + esc(r.phone) : ''}</div>
         ${r.passport?.series ? `<div class="timeline__sub">Паспорт: ${esc(r.passport.series)}</div>` : ''}
+        ${(r.manager || r.returnedBy) ? `<div class="timeline__sub">${r.manager ? 'Выдал: ' + esc(r.manager) : ''}${r.manager && r.returnedBy ? ' · ' : ''}${r.returnedBy ? 'Принял: ' + esc(r.returnedBy) : ''}</div>` : ''}
         ${r.site ? `<div class="timeline__sub">Объект: ${esc(r.site)}</div>` : ''}
         ${r.note ? `<div class="timeline__sub">${esc(r.note)}</div>` : ''}
       </li>`).join('')}</ul>`;
@@ -1134,6 +1172,74 @@
     return best;
   }
 
+  // Менеджер и режим работы устройства
+  function openUserForm(firstRun) {
+    const admin = isAdmin();
+    const pinSet = !!getAdminPin();
+    modal.open(`
+      <h2>${firstRun ? 'Представьтесь' : 'Менеджер и режим'}</h2>
+      ${firstRun ? `<p class="tool-card__cat" style="margin-top:-10px">Имя будет подписывать выдачи и возвраты с этого устройства.</p>` : ''}
+      <form id="userForm">
+        ${field('Ваше имя *', `<input name="mname" required value="${esc(managerName())}" placeholder="Александр">`)}
+        <button class="btn btn--primary btn--block" type="submit">Сохранить</button>
+      </form>
+      <div class="role-box">
+        <div class="role-box__row">
+          <span>Режим на этом устройстве:</span>
+          <b>${admin ? 'Администратор' : 'Менеджер'}</b>
+        </div>
+        ${admin ? `
+          <button class="btn btn--outline btn--sm btn--block" id="roleLogout">Выйти в режим менеджера</button>
+          <div class="field" style="margin-top:12px">
+            <label>Сменить PIN администратора</label>
+            <input id="newPin" inputmode="numeric" placeholder="Новый PIN (4–8 цифр)">
+          </div>
+          <button class="btn btn--outline btn--sm btn--block" id="pinChange">Сменить PIN</button>
+        ` : `
+          <div class="field" style="margin-top:12px">
+            <label>${pinSet ? 'PIN администратора' : 'PIN ещё не задан — придумайте и введите новый'}</label>
+            <input id="adminPin" inputmode="numeric" placeholder="${pinSet ? 'PIN' : 'Новый PIN (4–8 цифр)'}">
+          </div>
+          <button class="btn btn--outline btn--sm btn--block" id="roleLogin">${pinSet ? 'Войти как администратор' : 'Задать PIN и включить режим администратора'}</button>
+        `}
+      </div>
+    `);
+    $('#userForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = new FormData(e.target).get('mname').trim();
+      if (!name) return;
+      localStorage.setItem(NAME_KEY, name);
+      updateUserBtn();
+      modal.close();
+      toast('Сохранено: ' + name);
+    });
+    if ($('#roleLogin')) $('#roleLogin').addEventListener('click', () => {
+      const pin = $('#adminPin').value.trim();
+      const saved = getAdminPin();
+      if (!saved) {
+        if (!/^\d{4,8}$/.test(pin)) { toast('PIN — от 4 до 8 цифр', 'err'); return; }
+        saveAdminPin(pin);
+        localStorage.setItem(ROLE_KEY, 'admin');
+        modal.close(); toast('PIN задан, режим администратора включён'); updateUserBtn(); router();
+      } else if (pin === saved) {
+        localStorage.setItem(ROLE_KEY, 'admin');
+        modal.close(); toast('Режим администратора включён'); updateUserBtn(); router();
+      } else {
+        toast('Неверный PIN', 'err');
+      }
+    });
+    if ($('#roleLogout')) $('#roleLogout').addEventListener('click', () => {
+      localStorage.setItem(ROLE_KEY, 'manager');
+      modal.close(); toast('Режим менеджера'); updateUserBtn(); router();
+    });
+    if ($('#pinChange')) $('#pinChange').addEventListener('click', () => {
+      const pin = $('#newPin').value.trim();
+      if (!/^\d{4,8}$/.test(pin)) { toast('PIN — от 4 до 8 цифр', 'err'); return; }
+      saveAdminPin(pin);
+      modal.close(); toast('PIN изменён');
+    });
+  }
+
   function openRentForm(t) {
     const clients = clientsIndex();
     const names = Object.values(clients).map(c => c.name).sort((a, b) => a.localeCompare(b, 'ru'));
@@ -1331,10 +1437,11 @@
 
     form.addEventListener('submit', (e) => {
       e.preventDefault();
+      if (!managerName()) { toast('Сначала представьтесь — кнопка с человечком в шапке', 'err'); return; }
       const f = new FormData(e.target);
       const renter = f.get('renter').trim(); if (!renter) return;
       const rental = {
-        id: rid(), renter, phone: f.get('phone').trim(), site: f.get('site').trim(),
+        id: rid(), renter, manager: managerName(), phone: f.get('phone').trim(), site: f.get('site').trim(),
         dueAt: f.get('dueAt'), note: f.get('note').trim(), takenAt: nowISO(), returnedAt: null,
       };
       const passport = {
@@ -1369,6 +1476,7 @@
       e.preventDefault();
       const f = new FormData(e.target);
       cur.returnedAt = nowISO();
+      if (managerName()) cur.returnedBy = managerName();
       const note = f.get('note').trim();
       if (note) cur.note = (cur.note ? cur.note + ' | ' : '') + 'Возврат: ' + note;
       const cond = f.get('condition');
@@ -1390,7 +1498,7 @@
             <option>Ремонт</option><option>Диагностика</option><option>Прочее</option>
           </select>`)}
         </div>
-        ${field('Мастер', `<input name="master" placeholder="Кто проводил">`)}
+        ${field('Мастер', `<input name="master" value="${esc(managerName())}" placeholder="Кто проводил">`)}
         ${field('Описание', `<textarea name="note" rows="2" placeholder="Что сделано, заменённые детали…"></textarea>`)}
         ${field('После ТО — статус', `<select name="status">
           <option value="">Не менять</option>
@@ -1686,9 +1794,15 @@
   }
 
   // ---------- Старт ----------
+  $('#userBtn').addEventListener('click', () => openUserForm(false));
+
   async function start() {
     store.load();                       // мгновенный рендер из локального кэша
     render(true);
+    updateUserBtn();
+    // Первое включение на устройстве — просим представиться,
+    // чтобы выдачи и возвраты были подписаны
+    if (!managerName()) setTimeout(() => openUserForm(true), 600);
 
     const synced = await sync.init();
     if (!synced) {                      // бэкенд не настроен — локальный режим (как раньше)
