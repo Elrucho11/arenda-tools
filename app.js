@@ -1207,7 +1207,10 @@
           if (cloud.dept_code) el('passDeptCode').value = fmtDeptCode(cloud.dept_code);
           if (cloud.birth_date) el('birthDate').value = cloud.birth_date;
           form.querySelector('.pass-details').open = true;
-          const complete = cloud.last_name && cloud.first_name && cloud.series && cloud.number && cloud.issue_date;
+          // Полным считаем результат, только если есть всё, что умеет дочитывать МЧЗ
+          // («Кем выдан» не в счёт — его в МЧЗ нет, локально не дочитаешь)
+          const complete = cloud.last_name && cloud.first_name && cloud.series && cloud.number
+            && cloud.issue_date && cloud.birth_date && cloud.dept_code;
           if (complete && cloud.confidence === 'high') { toast('Паспорт распознан'); return; }
           if (complete) { toast('Распознано — проверьте данные (фото не идеальное)', 'err'); return; }
           // облако прочитало не всё — дочитываем недостающее по МЧЗ локально

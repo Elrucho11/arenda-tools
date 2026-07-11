@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { image, media_type } = await req.json();
+    const { image, media_type, debug } = await req.json();
     if (!image || typeof image !== "string") {
       return new Response(JSON.stringify({ error: "нет изображения" }), { status: 400, headers: cors });
     }
@@ -149,7 +149,11 @@ Deno.serve(async (req) => {
     if (missing >= 3) data.confidence = "low";
     else if (missing > 0 || !data.dept_code) data.confidence = "medium";
 
-    return new Response(JSON.stringify({ data }), { headers: cors });
+    const body: Record<string, unknown> = { data };
+    if (debug === true) {
+      body.debug = { entities: annotation.entities ?? [], fullText };
+    }
+    return new Response(JSON.stringify(body), { headers: cors });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return new Response(JSON.stringify({ error: message }), { status: 500, headers: cors });
