@@ -36,48 +36,39 @@ function isoDate(s: string | null): string | null {
 }
 
 // «Кем выдан» не выделяется паспортной моделью — достаём из полного текста
-// страницы (его даёт вторая, обычная текстовая модель).
+// страницы (его даёт вторая, обычная текстовая модель). Название органа может
+// быть разбито на несколько строк, между которыми OCR вклинивает мусор
+// (вертикальные красные цифры серии, обрывки фона) — мусор пропускаем,
+// сбор останавливаем только на настоящих границах.
 function extractIssuedBy(fullText: string): string | null {
   const lines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const cyr = (s: string) => s.replace(/[^а-яёА-ЯЁ]/g, "").length;
+  const HARD = /дата\s*выдачи|код\s*подразделения|личн(ый|ая)|подпись|фамилия|^имя\b|отчество|место\s*рожд|дата\s*рожд|^пол\b/i;
 
-  // 1) Приоритет: подряд идущие строки с названием органа, выдавшего паспорт
-  const KEYWORDS = /(УМВД|ГУ ?МВД|МВД|УФМС|ФМС|ОВД|РОВД|ОУФМС|ОТДЕЛ(ОМ|ЕНИ)?|МИГРАЦ|ПОЛИЦИ|МИЛИЦИ)/i;
-  const run: string[] = [];
-  let started = false;
-  for (const line of lines) {
-    const isAuthority = KEYWORDS.test(line) ||
-      (started && /^[А-ЯЁ\s.\-«»№0-9]+$/.test(line) && /[А-ЯЁ]{3}/.test(line) &&
-        !/ФЕДЕРАЦИЯ|ВЫДАЧИ|ПОДРАЗДЕЛЕНИЯ|ФАМИЛИЯ|РОССИЯ$/.test(line) &&
-        !/^\d/.test(line));
-    if (isAuthority) { run.push(line); started = true; }
-    else if (started) break;
-  }
-  const fromRun = run.join(" ").replace(/\s+/g, " ").trim();
-  if (fromRun.length >= 8) return fromRun;
-
-  // 2) Сегмент между «Паспорт выдан» и «Дата выдачи»/датой
-  const seg = fullText.match(/паспорт\s*выдан([\s\S]*?)(дата\s*выдачи|код\s*подразделения|\d{2}\.\d{2}\.\d{4})/i);
-  if (seg) {
-    const text = seg[1].split("\n").map((l) => l.trim()).filter(Boolean)
-      .filter((l) => l.replace(/[^а-яёА-ЯЁ]/g, "").length >= 3)
-      .join(" ").replace(/\s+/g, " ").trim();
-    if (text.length >= 8) return text;
-  }
-
-  // 3) Строки верхней части страницы до первой служебной надписи
   const out: string[] = [];
   for (const line of lines) {
     const low = line.toLowerCase();
-    if (/дата выдачи|код подразделения|личн(ый|ая)|подпись/.test(low)) break;
-    if (/^\d{2}\.\d{2}\.\d{4}/.test(line) || /^\d{3}-\d{3}$/.test(line)) break;
-    if (/фамилия|^имя|отчество|пол|место рождения|дата рождения/.test(low)) break;
-    if (/российская федерация|паспорт выдан/.test(low)) continue;
-    if (line.replace(/[^а-яёА-ЯЁ]/g, "").length < 3) continue;
+    if (HARD.test(low)) break;                                 // настоящая граница
+    if (/^\d{2}\.\d{2}\.\d{4}/.test(line)) break;              // дата выдачи
+    if (/^\d{3}-\d{3}$/.test(line)) break;                     // код подразделения
+    if (/российская|федерация|паспорт\s*выдан/.test(low)) continue;
+    if (cyr(line) < 4) continue;                               // «41», «990553» — мусор
+    if (/^(?:[а-яёА-ЯЁ]\s+){2,}[а-яёА-ЯЁ]$/.test(line)) continue; // «Ф Е Д Е Р А Ц И Я»
+    if (line.replace(/\D/g, "").length > cyr(line)) continue;  // цифр больше, чем букв
     out.push(line);
-    if (out.length >= 5) break;
+    if (out.length >= 5) break;                                // максимум несколько строк
   }
   const text = out.join(" ").replace(/\s+/g, " ").trim();
-  return text.length >= 8 ? text : null;
+  if (text.length >= 8) return text;
+
+  // Запасной способ: сегмент между «Паспорт выдан» и «Дата выдачи»/датой
+  const seg = fullText.match(/паспорт\s*выдан([\s\S]*?)(дата\s*выдачи|код\s*подразделения|\d{2}\.\d{2}\.\d{4})/i);
+  if (seg) {
+    const t = seg[1].split("\n").map((l) => l.trim()).filter((l) => cyr(l) >= 4)
+      .join(" ").replace(/\s+/g, " ").trim();
+    if (t.length >= 8) return t;
+  }
+  return null;
 }
 
 // Разбор второй строки МЧЗ из распознанного текста: серия/номер/даты/код
