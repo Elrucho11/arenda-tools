@@ -1012,17 +1012,28 @@
 
   // Облачное распознавание: фото → Edge Function → нейросеть с компьютерным зрением.
   // Читает всю страницу (включая «Кем выдан» и место рождения), а не только МЧЗ.
-  async function recognizePassportCloud(file, mode) {
+  // Фото → JPEG base64: ужимаем до 1600px по длинной стороне, при необходимости
+  // поворачиваем (для штампов, снятых боком)
+  async function fileToJpegBase64(file, rotateDeg) {
+    const img = await fileToImage(file);
+    const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth * scale);
+    const h = Math.round(img.naturalHeight * scale);
+    const c = document.createElement('canvas');
+    const deg = rotateDeg || 0;
+    if (deg === 90 || deg === 270) { c.width = h; c.height = w; }
+    else { c.width = w; c.height = h; }
+    const ctx = c.getContext('2d');
+    ctx.translate(c.width / 2, c.height / 2);
+    ctx.rotate(deg * Math.PI / 180);
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    return c.toDataURL('image/jpeg', 0.85).split(',')[1];
+  }
+
+  async function recognizePassportCloud(file, mode, rotateDeg) {
     const url = window.APP_CONFIG && window.APP_CONFIG.CLOUD_OCR_URL;
     if (!url || !navigator.onLine) return null;
-    const img = await fileToImage(file);
-    // ужимаем до 1600px по длинной стороне — достаточно для чтения, быстро грузится
-    const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
-    const c = document.createElement('canvas');
-    c.width = Math.round(img.naturalWidth * scale);
-    c.height = Math.round(img.naturalHeight * scale);
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    const dataUrl = c.toDataURL('image/jpeg', 0.85);
+    const image = await fileToJpegBase64(file, rotateDeg);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 60000);
@@ -1033,7 +1044,7 @@
           'Content-Type': 'application/json',
           'apikey': window.APP_CONFIG.SUPABASE_ANON_KEY || '',
         },
-        body: JSON.stringify({ image: dataUrl.split(',')[1], media_type: 'image/jpeg', mode: mode || undefined }),
+        body: JSON.stringify({ image, media_type: 'image/jpeg', mode: mode || undefined }),
         signal: controller.signal,
       });
       if (!resp.ok) throw new Error('облако недоступно (' + resp.status + ')');
@@ -1185,12 +1196,24 @@
       if (!file) return;
       if (!navigator.onLine) { toast('Для распознавания прописки нужен интернет', 'err'); return; }
       addrBtn.disabled = true;
-      addrBtn.textContent = 'Распознаю штамп…';
       try {
-        const r = await recognizePassportCloud(file, 'address');
-        if (r && r.reg_address) {
-          el('regAddress').value = r.reg_address;
-          if (r.confidence === 'high') toast('Прописка распознана — сверьте с почерком');
+        // Штамп часто фотографируют боком — перебираем ориентации,
+        // пока адрес не соберётся уверенно
+        let best = null;
+        for (const deg of [0, 90, 270, 180]) {
+          addrBtn.textContent = deg ? `Распознаю штамп (поворот ${deg}°)…` : 'Распознаю штамп…';
+          let r = null;
+          try { r = await recognizePassportCloud(file, 'address', deg); } catch (e) { console.warn('поворот ' + deg + '°:', e); }
+          if (r && r.reg_address) {
+            const score = (r.reg_address.match(/,/g) || []).length * 2
+              + (r.confidence === 'high' ? 10 : r.confidence === 'medium' ? 5 : 0);
+            if (!best || score > best.score) best = { r, score };
+            if (r.confidence !== 'low') break;
+          }
+        }
+        if (best) {
+          el('regAddress').value = best.r.reg_address;
+          if (best.r.confidence === 'high') toast('Прописка распознана — сверьте с почерком');
           else toast('Прописка распознана не полностью — проверьте и допишите', 'err');
         } else {
           toast('Штамп не распознан — попробуйте более чёткое фото', 'err');

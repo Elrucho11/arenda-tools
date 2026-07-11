@@ -174,10 +174,20 @@ function parseMrzFromText(fullText: string) {
 // ул. / дом №; значение может оказаться и на следующей строке после метки.
 function parseRegistration(fullText: string) {
   const rawLines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
-  // штамп начинается с «ЗАРЕГИСТРИРОВАН» — если нашли, отрезаем всё до него
+  // Обычно штамп начинается с «ЗАРЕГИСТРИРОВАН», но при боковом фото это
+  // вертикальное слово может попасть в текст ПОСЛЕ полей — пробуем оба варианта
+  // и берём тот, где полей собралось больше.
   const start = rawLines.findIndex((l) => /зарегистрирован/i.test(l));
-  const lines = start >= 0 ? rawLines.slice(start) : rawLines;
+  const sliced = start >= 0 ? rawLines.slice(start) : rawLines;
+  const a = parseRegistrationLines(sliced);
+  if (start > 0) {
+    const b = parseRegistrationLines(rawLines);
+    if (b.found > a.found) return { reg_address: b.reg_address, confidence: b.confidence };
+  }
+  return { reg_address: a.reg_address, confidence: a.confidence };
+}
 
+function parseRegistrationLines(lines: string[]) {
   const clean = (s: string) =>
     s.replace(/[_]+/g, " ").replace(/\s+/g, " ").replace(/^[\s:.,\-—]+|[\s:.,\-—]+$/g, "").trim();
   const isLabelOnly = (s: string) => !clean(s);
@@ -202,9 +212,10 @@ function parseRegistration(fullText: string) {
     // NB: \W в JS считает кириллицу «не-словом» — используем явный класс разделителей
     const SEP = "[\\s:.,№«»_\\-—]*";
     let v: string | null;
-    if (!region && (v = grab(line, new RegExp(`рег[^а-яёa-z0-9]{0,3}н${SEP}(.*)`, "i"))) !== null) {
+    // метки бывают полные («Регион», «Район») и сокращённые («Рег-н», «Р-н»)
+    if (!region && (v = grab(line, new RegExp(`^рег(?:ион|[^а-яёa-z0-9]{0,3}н)${SEP}(.*)`, "i"))) !== null) {
       region = v || next();
-    } else if (!district && (v = grab(line, new RegExp(`^р[^а-яёa-z0-9]{0,3}н${SEP}(.*)`, "i"))) !== null) {
+    } else if (!district && (v = grab(line, new RegExp(`^р(?:айон|[^а-яёa-z0-9]{0,3}н)${SEP}(.*)`, "i"))) !== null) {
       district = v || next();
     } else if (!settlement && (v = grab(line, new RegExp(`пункт${SEP}(.*)`, "i"))) !== null) {
       settlement = v || next();
@@ -237,6 +248,7 @@ function parseRegistration(fullText: string) {
   return {
     reg_address: address.length >= 8 ? address : null,
     confidence: found >= 4 ? "high" : found >= 2 ? "medium" : "low",
+    found,
   };
 }
 

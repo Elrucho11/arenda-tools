@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#1a1d22" id="themeColor">
   <title>АрендаСтрой · Инструмент</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="logo.svg?v=19" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icons/icon-192.png?v=19">
+  <link rel="icon" href="logo.svg?v=20" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=20">
   <script>
     // Применяем сохранённую тему сразу, до отрисовки — чтобы не было мигания
     try { var _t = localStorage.getItem('theme'); if (_t === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}
   </script>
-  <link rel="stylesheet" href="theme.css?v=19">
-  <link rel="stylesheet" href="app.css?v=19">
+  <link rel="stylesheet" href="theme.css?v=20">
+  <link rel="stylesheet" href="app.css?v=20">
 </head>
 <body>
   <!-- Шапка -->
@@ -58,12 +58,12 @@
   <div class="toast-wrap" id="toastWrap"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=19"></script>
+  <script src="config.js?v=20"></script>
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/html5-qrcode.min.js"></script>
   <script src="vendor/tesseract/tesseract.min.js"></script>
-  <script src="catalog-data.js?v=19"></script>
-  <script src="app.js?v=19"></script>
+  <script src="catalog-data.js?v=20"></script>
+  <script src="app.js?v=20"></script>
   <script>
     // Убираем любой ранее установленный service worker и его кэш — чтобы устройства
     // всегда получали свежую версию (раньше из-за кэша подгружалась старая).
