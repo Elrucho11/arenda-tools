@@ -36,37 +36,81 @@ function isoDate(s: string | null): string | null {
 }
 
 // «Кем выдан» не выделяется паспортной моделью — достаём из полного текста
-// страницы (его даёт вторая, обычная текстовая модель). Название органа может
-// быть разбито на несколько строк, между которыми OCR вклинивает мусор
-// (вертикальные красные цифры серии, обрывки фона) — мусор пропускаем,
-// сбор останавливаем только на настоящих границах.
+// кадра. В кадре могут лежать посторонние бумаги, поэтому сбор начинается
+// только от якоря «Паспорт выдан» или от строки с названием органа
+// (УМВД/УФМС/ОТДЕЛ…), мусорные вставки пропускаются, а результат обязан
+// содержать ключевое слово органа — иначе честный null.
 function extractIssuedBy(fullText: string): string | null {
   const lines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
   const cyr = (s: string) => s.replace(/[^а-яёА-ЯЁ]/g, "").length;
-  const HARD = /дата\s*выдачи|код\s*подразделения|личн(ый|ая)|подпись|фамилия|^имя\b|отчество|место\s*рожд|дата\s*рожд|^пол\b/i;
+  const KEY = /(УМВД|ГУ\s?МВД|МВД|УВД|ГУВД|УФМС|ОУФМС|ФМС|ОВД|РОВД|ПОЛИЦИ|МИЛИЦИ|ОТДЕЛ|МИГРАЦ|КОНСУЛ|ПОСОЛЬСТ)/i;
+  const BOUND = /дата\s*выдачи|код\s*подразделения|личн(ый|ая)|подпись|фамилия|^имя\b|отчество|место\s*рожд|дата\s*рожд|^пол\b/i;
+  const junk = (line: string) =>
+    cyr(line) < 4 ||                                        // «41», «990553»
+    /^(?:[а-яёА-ЯЁ]\s+){2,}[а-яёА-ЯЁ]$/.test(line) ||       // «Ф Е Д Е Р А Ц И Я»
+    line.replace(/\D/g, "").length > cyr(line);             // цифр больше, чем букв
 
-  const out: string[] = [];
-  for (const line of lines) {
-    const low = line.toLowerCase();
-    if (HARD.test(low)) break;                                 // настоящая граница
-    if (/^\d{2}\.\d{2}\.\d{4}/.test(line)) break;              // дата выдачи
-    if (/^\d{3}-\d{3}$/.test(line)) break;                     // код подразделения
-    if (/российская|федерация|паспорт\s*выдан/.test(low)) continue;
-    if (cyr(line) < 4) continue;                               // «41», «990553» — мусор
-    if (/^(?:[а-яёА-ЯЁ]\s+){2,}[а-яёА-ЯЁ]$/.test(line)) continue; // «Ф Е Д Е Р А Ц И Я»
-    if (line.replace(/\D/g, "").length > cyr(line)) continue;  // цифр больше, чем букв
-    out.push(line);
-    if (out.length >= 5) break;                                // максимум несколько строк
+  const collect = (start: number) => {
+    const out: string[] = [];
+    for (let i = start; i < lines.length && out.length < 5; i++) {
+      const line = lines[i];
+      const low = line.toLowerCase();
+      if (BOUND.test(low)) break;
+      if (/^\d{2}\.\d{2}\.\d{4}/.test(line) || /^\d{3}-\d{3}$/.test(line)) break;
+      if (/^[A-Z0-9<]{20,}$/.test(line.replace(/\s/g, ""))) break; // МЧЗ
+      if (/российская|федерация|паспорт\s*выдан/.test(low)) continue;
+      if (junk(line)) continue;
+      out.push(line);
+    }
+    return out.join(" ").replace(/\s+/g, " ").trim();
+  };
+
+  // 1) от якоря «Паспорт выдан»
+  const a = lines.findIndex((l) => /паспорт\s*выдан/i.test(l));
+  if (a !== -1) {
+    const t = collect(a);
+    if (t.length >= 8 && KEY.test(t)) return t;
   }
-  const text = out.join(" ").replace(/\s+/g, " ").trim();
-  if (text.length >= 8) return text;
+  // 2) от первой строки с названием органа
+  const k = lines.findIndex((l) => KEY.test(l) && !junk(l));
+  if (k !== -1) {
+    const t = collect(k);
+    if (t.length >= 8 && KEY.test(t)) return t;
+  }
+  return null;
+}
 
-  // Запасной способ: сегмент между «Паспорт выдан» и «Дата выдачи»/датой
-  const seg = fullText.match(/паспорт\s*выдан([\s\S]*?)(дата\s*выдачи|код\s*подразделения|\d{2}\.\d{2}\.\d{4})/i);
-  if (seg) {
-    const t = seg[1].split("\n").map((l) => l.trim()).filter((l) => cyr(l) >= 4)
-      .join(" ").replace(/\s+/g, " ").trim();
-    if (t.length >= 8) return t;
+// ФИО из первой строки МЧЗ (PNRUS…) — спасает боковые/захламлённые фото,
+// где модель теряет печатные поля, но МЧЗ читается.
+const MRZ_CYR: Record<string, string> = {
+  A: "А", B: "Б", V: "В", G: "Г", D: "Д", E: "Е", "2": "Ё", J: "Ж", Z: "З", I: "И",
+  Q: "Й", K: "К", L: "Л", M: "М", N: "Н", O: "О", P: "П", R: "Р", S: "С", T: "Т",
+  U: "У", F: "Ф", H: "Х", C: "Ц", "3": "Ч", "4": "Ш", W: "Щ", X: "Ъ", Y: "Ы",
+  "9": "Ь", "6": "Э", "8": "Ю", "7": "Я",
+};
+const mrzWordToCyr = (s: string) => {
+  const w = [...s].map((c) => MRZ_CYR[c] ?? "").join("");
+  return w ? w[0] + w.slice(1).toLowerCase() : "";
+};
+function parseMrzNameFromText(fullText: string) {
+  const lines = fullText.toUpperCase().split("\n")
+    .map((l) => l.replace(/[^A-Z0-9<]/g, "")).filter((l) => l.length >= 20);
+  for (const raw of lines) {
+    const i = raw.search(/P[NM]RU[S5]/);
+    if (i === -1) continue;
+    const rest = raw.slice(i + 5).replace(/<+$/, ""); // отрезать хвостовые заполнители
+    // между фамилией и именем — «<<», но OCR может съесть один «<»
+    let tokens: string[];
+    if (rest.includes("<<")) {
+      const [surname, given = ""] = rest.split("<<");
+      tokens = [surname, ...given.split("<").filter(Boolean)];
+    } else {
+      tokens = rest.split("<").filter(Boolean);
+    }
+    const last = mrzWordToCyr(tokens[0] ?? "");
+    const first = mrzWordToCyr(tokens[1] ?? "");
+    const middle = mrzWordToCyr(tokens[2] ?? "");
+    if (last.length >= 2 && first.length >= 2) return { last, first, middle };
   }
   return null;
 }
@@ -215,6 +259,15 @@ Deno.serve(async (req) => {
       dept_code: subdivision.length === 6 ? subdivision.slice(0, 3) + "-" + subdivision.slice(3) : null,
       confidence: "high" as string,
     };
+
+    // ФИО из МЧЗ — добираем то, что модель не разглядела (боковые/захламлённые фото).
+    // Печатные поля точнее (е/ё), поэтому заполняем только пропуски.
+    const mrzName = parseMrzNameFromText(fullText);
+    if (mrzName) {
+      if (!data.last_name) data.last_name = mrzName.last;
+      if (!data.first_name) data.first_name = mrzName.first;
+      if (!data.middle_name && mrzName.middle) data.middle_name = mrzName.middle;
+    }
 
     // МЧЗ с сошедшимися контрольными цифрами перекрывает визуальную догадку модели
     const mrz = parseMrzFromText(fullText);
