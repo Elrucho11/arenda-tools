@@ -1012,7 +1012,7 @@
 
   // Облачное распознавание: фото → Edge Function → нейросеть с компьютерным зрением.
   // Читает всю страницу (включая «Кем выдан» и место рождения), а не только МЧЗ.
-  async function recognizePassportCloud(file) {
+  async function recognizePassportCloud(file, mode) {
     const url = window.APP_CONFIG && window.APP_CONFIG.CLOUD_OCR_URL;
     if (!url || !navigator.onLine) return null;
     const img = await fileToImage(file);
@@ -1033,7 +1033,7 @@
           'Content-Type': 'application/json',
           'apikey': window.APP_CONFIG.SUPABASE_ANON_KEY || '',
         },
-        body: JSON.stringify({ image: dataUrl.split(',')[1], media_type: 'image/jpeg' }),
+        body: JSON.stringify({ image: dataUrl.split(',')[1], media_type: 'image/jpeg', mode: mode || undefined }),
         signal: controller.signal,
       });
       if (!resp.ok) throw new Error('облако недоступно (' + resp.status + ')');
@@ -1154,6 +1154,11 @@
             ${field('Дата рождения', `<input name="birthDate" type="date">`)}
           </div>
           ${field('Адрес регистрации', `<input name="regAddress" placeholder="г. Тюмень, ул. …">`)}
+          <div class="field">
+            <button type="button" class="btn btn--outline btn--sm btn--block" id="addrScanBtn">${icon('camera')} Распознать прописку по фото штампа</button>
+            <input type="file" id="addrScanFile" accept="image/*" hidden>
+            <div class="hint">Страница со штампом «ЗАРЕГИСТРИРОВАН» (5-я). Почерк — проверьте результат.</div>
+          </div>
         </details>
         ${field('Объект / адрес', `<input name="site" placeholder="ЖК Северный, корп. 3">`)}
         ${field('Примечание', `<textarea name="note" rows="2" placeholder="Залог, комплект…"></textarea>`)}
@@ -1167,6 +1172,37 @@
     // Маски: серия/номер «#### ######», код подразделения «###-###»
     el('passSeries').addEventListener('input', (e) => { e.target.value = fmtPassSeries(e.target.value); });
     el('passDeptCode').addEventListener('input', (e) => { e.target.value = fmtDeptCode(e.target.value); });
+
+    // Распознавание прописки по фото штампа «ЗАРЕГИСТРИРОВАН» (только облако:
+    // рукописный текст локальному OCR не по зубам)
+    const addrBtn = form.querySelector('#addrScanBtn');
+    const addrFile = form.querySelector('#addrScanFile');
+    const addrLabel = addrBtn.innerHTML;
+    addrBtn.addEventListener('click', () => addrFile.click());
+    addrFile.addEventListener('change', async () => {
+      const file = addrFile.files[0];
+      addrFile.value = '';
+      if (!file) return;
+      if (!navigator.onLine) { toast('Для распознавания прописки нужен интернет', 'err'); return; }
+      addrBtn.disabled = true;
+      addrBtn.textContent = 'Распознаю штамп…';
+      try {
+        const r = await recognizePassportCloud(file, 'address');
+        if (r && r.reg_address) {
+          el('regAddress').value = r.reg_address;
+          if (r.confidence === 'high') toast('Прописка распознана — сверьте с почерком');
+          else toast('Прописка распознана не полностью — проверьте и допишите', 'err');
+        } else {
+          toast('Штамп не распознан — попробуйте более чёткое фото', 'err');
+        }
+      } catch (err) {
+        console.error(err);
+        toast('Ошибка распознавания: ' + err.message, 'err');
+      } finally {
+        addrBtn.disabled = false;
+        addrBtn.innerHTML = addrLabel;
+      }
+    });
 
     // Распознавание паспорта по фото (МЧЗ)
     const scanBtn = form.querySelector('#passScanBtn');

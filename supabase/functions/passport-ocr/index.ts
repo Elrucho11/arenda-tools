@@ -169,6 +169,77 @@ function parseMrzFromText(fullText: string) {
   };
 }
 
+// Разбор штампа «ЗАРЕГИСТРИРОВАН» (5-я страница): печатные подписи полей +
+// рукописные значения. Собираем адрес из строк с метками Рег-н / Р-н / Пункт /
+// ул. / дом №; значение может оказаться и на следующей строке после метки.
+function parseRegistration(fullText: string) {
+  const rawLines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
+  // штамп начинается с «ЗАРЕГИСТРИРОВАН» — если нашли, отрезаем всё до него
+  const start = rawLines.findIndex((l) => /зарегистрирован/i.test(l));
+  const lines = start >= 0 ? rawLines.slice(start) : rawLines;
+
+  const clean = (s: string) =>
+    s.replace(/[_]+/g, " ").replace(/\s+/g, " ").replace(/^[\s:.,\-—]+|[\s:.,\-—]+$/g, "").trim();
+  const isLabelOnly = (s: string) => !clean(s);
+
+  let region = "", district = "", settlement = "", street = "";
+  let house = "", building = "", flat = "";
+
+  const grab = (line: string, re: RegExp): string | null => {
+    const m = line.match(re);
+    return m ? clean(m[1] ?? "") : null;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const next = () => {
+      const n = lines[i + 1] || "";
+      // значение уехало на следующую строку, если та не очередная метка
+      if (/рег|^р[\s.\-]?н|пункт|^ул|дом|корп|стр|^кв|отдел|мвд|подпись|фамилия/i.test(n)) return "";
+      i++;
+      return clean(n);
+    };
+    // NB: \W в JS считает кириллицу «не-словом» — используем явный класс разделителей
+    const SEP = "[\\s:.,№«»_\\-—]*";
+    let v: string | null;
+    if (!region && (v = grab(line, new RegExp(`рег[^а-яёa-z0-9]{0,3}н${SEP}(.*)`, "i"))) !== null) {
+      region = v || next();
+    } else if (!district && (v = grab(line, new RegExp(`^р[^а-яёa-z0-9]{0,3}н${SEP}(.*)`, "i"))) !== null) {
+      district = v || next();
+    } else if (!settlement && (v = grab(line, new RegExp(`пункт${SEP}(.*)`, "i"))) !== null) {
+      settlement = v || next();
+    } else if (!street && (v = grab(line, new RegExp(`^ул${SEP}(.*)`, "i"))) !== null) {
+      street = v || next();
+    } else if (/дом/i.test(line)) {
+      const h = line.match(new RegExp(`дом${SEP}([0-9]+[а-яёА-ЯЁa-z]?(?:[\\/-][0-9а-яёА-ЯЁ]+)?)`, "i"));
+      if (h) house = h[1];
+      const k = line.match(new RegExp(`корп${SEP}([0-9]+[а-яёА-ЯЁ]?)`, "i"));
+      if (k) building = k[1];
+      const f = line.match(new RegExp(`кв${SEP}([0-9]+)`, "i"));
+      if (f) flat = f[1];
+    } else if (!flat) {
+      const f = line.match(new RegExp(`^кв${SEP}([0-9]+)`, "i"));
+      if (f) flat = f[1];
+    }
+  }
+
+  const parts: string[] = [];
+  if (region) parts.push(region);
+  if (district) parts.push(/р-?н|район/i.test(district) ? district : district + " р-н");
+  if (settlement) parts.push(settlement);
+  if (street) parts.push(/^(ул|пер|пр|б-р|мкр|проезд|шоссе)/i.test(street) ? street : "ул. " + street);
+  if (house) parts.push("д. " + house);
+  if (building) parts.push("корп. " + building);
+  if (flat) parts.push("кв. " + flat);
+
+  const address = parts.join(", ").replace(/\s+/g, " ").trim();
+  const found = [region, district || settlement, street, house].filter(Boolean).length;
+  return {
+    reg_address: address.length >= 8 ? address : null,
+    confidence: found >= 4 ? "high" : found >= 2 ? "medium" : "low",
+  };
+}
+
 Deno.serve(async (req) => {
   const cors = corsHeaders(req.headers.get("origin"));
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -186,7 +257,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { image, media_type, debug } = await req.json();
+    const { image, media_type, debug, mode } = await req.json();
     if (!image || typeof image !== "string") {
       return new Response(JSON.stringify({ error: "нет изображения" }), { status: 400, headers: cors });
     }
@@ -210,6 +281,26 @@ Deno.serve(async (req) => {
           content: image,
         }),
       });
+
+    // Режим «прописка»: штамп «ЗАРЕГИСТРИРОВАН» — рукописный текст,
+    // читаем моделью handwritten и собираем адрес по меткам полей.
+    if (mode === "address") {
+      const hwResp = await ycOcr("handwritten");
+      if (!hwResp.ok) {
+        const detail = await hwResp.text();
+        return new Response(
+          JSON.stringify({ error: `Yandex OCR ${hwResp.status}: ${detail.slice(0, 300)}` }),
+          { status: 502, headers: cors },
+        );
+      }
+      const hwPayload = await hwResp.json();
+      const hwAnn = hwPayload?.result?.textAnnotation ?? hwPayload?.result?.text_annotation;
+      const hwText: string = hwAnn?.fullText ?? hwAnn?.full_text ?? "";
+      const reg = parseRegistration(hwText);
+      const body: Record<string, unknown> = { data: reg };
+      if (debug === true) body.debug = { fullText: hwText };
+      return new Response(JSON.stringify(body), { headers: cors });
+    }
 
     const [passResp, pageResp] = await Promise.all([ycOcr("passport"), ycOcr("page")]);
 
