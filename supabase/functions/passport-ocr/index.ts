@@ -35,22 +35,36 @@ function isoDate(s: string | null): string | null {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
 }
 
-// «Кем выдан» не выделяется моделью отдельным полем — достаём из полного текста.
-// Основной способ: сегмент между «Паспорт выдан» и «Дата выдачи»/датой.
-// Запасной: строки верхней части страницы до первой служебной надписи.
+// «Кем выдан» не выделяется паспортной моделью — достаём из полного текста
+// страницы (его даёт вторая, обычная текстовая модель).
 function extractIssuedBy(fullText: string): string | null {
-  const clean = (s: string) =>
-    s.split("\n").map((l) => l.trim()).filter(Boolean)
-      .filter((l) => l.replace(/[^а-яёА-ЯЁ]/g, "").length >= 3)
-      .join(" ").replace(/\s+/g, " ").trim();
+  const lines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
 
+  // 1) Приоритет: подряд идущие строки с названием органа, выдавшего паспорт
+  const KEYWORDS = /(УМВД|ГУ ?МВД|МВД|УФМС|ФМС|ОВД|РОВД|ОУФМС|ОТДЕЛ(ОМ|ЕНИ)?|МИГРАЦ|ПОЛИЦИ|МИЛИЦИ)/i;
+  const run: string[] = [];
+  let started = false;
+  for (const line of lines) {
+    const isAuthority = KEYWORDS.test(line) ||
+      (started && /^[А-ЯЁ\s.\-«»№0-9]+$/.test(line) && /[А-ЯЁ]{3}/.test(line) &&
+        !/ФЕДЕРАЦИЯ|ВЫДАЧИ|ПОДРАЗДЕЛЕНИЯ|ФАМИЛИЯ|РОССИЯ$/.test(line) &&
+        !/^\d/.test(line));
+    if (isAuthority) { run.push(line); started = true; }
+    else if (started) break;
+  }
+  const fromRun = run.join(" ").replace(/\s+/g, " ").trim();
+  if (fromRun.length >= 8) return fromRun;
+
+  // 2) Сегмент между «Паспорт выдан» и «Дата выдачи»/датой
   const seg = fullText.match(/паспорт\s*выдан([\s\S]*?)(дата\s*выдачи|код\s*подразделения|\d{2}\.\d{2}\.\d{4})/i);
   if (seg) {
-    const text = clean(seg[1]);
+    const text = seg[1].split("\n").map((l) => l.trim()).filter(Boolean)
+      .filter((l) => l.replace(/[^а-яёА-ЯЁ]/g, "").length >= 3)
+      .join(" ").replace(/\s+/g, " ").trim();
     if (text.length >= 8) return text;
   }
 
-  const lines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
+  // 3) Строки верхней части страницы до первой служебной надписи
   const out: string[] = [];
   for (const line of lines) {
     const low = line.toLowerCase();
@@ -60,10 +74,64 @@ function extractIssuedBy(fullText: string): string | null {
     if (/российская федерация|паспорт выдан/.test(low)) continue;
     if (line.replace(/[^а-яёА-ЯЁ]/g, "").length < 3) continue;
     out.push(line);
-    if (out.length >= 5) break; // «кем выдан» — максимум несколько строк
+    if (out.length >= 5) break;
   }
   const text = out.join(" ").replace(/\s+/g, " ").trim();
   return text.length >= 8 ? text : null;
+}
+
+// Разбор второй строки МЧЗ из распознанного текста: серия/номер/даты/код
+// с проверкой контрольных цифр (веса 7-3-1). Надёжнее «визуальной» догадки модели.
+function parseMrzFromText(fullText: string) {
+  const lines = fullText.toUpperCase().split("\n")
+    .map((l) => l.replace(/[^A-Z0-9<]/g, "")).filter((l) => l.length >= 25);
+  let l2 = "";
+  for (const l of lines) {
+    const norm = l.replace(/O/g, "0").replace(/[IL]/g, "1");
+    if (/^\d{7}/.test(norm) && l.replace(/5/g, "S").includes("RUS")) { l2 = l; break; }
+  }
+  if (!l2) return null;
+  const a2 = l2.replace(/5/g, "S").indexOf("RUS");
+  if (a2 >= 10) l2 = l2.slice(a2 - 10);
+  l2 = l2.padEnd(44, "<");
+  const dig = (s: string) => s.replace(/[OQ]/g, "0").replace(/[IL]/g, "1").replace(/B/g, "8")
+    .replace(/S/g, "5").replace(/Z/g, "2").replace(/G/g, "6");
+  const docField = dig(l2.slice(0, 9));
+  const birth = dig(l2.slice(13, 19));
+  if (!/^\d{9}$/.test(docField) || !/^\d{6}$/.test(birth)) return null;
+  const check = (s: string) => [...s].reduce((sum, c, i) =>
+    sum + (c === "<" ? 0 : (c >= "0" && c <= "9" ? +c : c.charCodeAt(0) - 55)) * [7, 3, 1][i % 3], 0) % 10;
+  const valid = check(l2.slice(0, 9)) === +dig(l2[9]) && check(l2.slice(13, 19)) === +dig(l2[19]);
+  // Личное поле: и по позиции 29–42, и по якорю «цифры после заполнителей» —
+  // выбираем вариант с правдоподобной датой выдачи (лечит съеденный «<»)
+  const cands = [dig(l2.slice(28, 41))];
+  const am = l2.slice(20).match(/<+([0-9OQILBSZG]{7,13})/);
+  if (am) cands.push(dig(am[1]));
+  let best = cands[0], bestScore = -1;
+  for (const p of cands) {
+    const is = p.slice(1, 7), mm = +is.slice(2, 4), dd = +is.slice(4, 6);
+    let score = 0;
+    if (/^\d/.test(p)) score += 1;
+    if (/^\d{6}$/.test(is) && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) score += 2;
+    if (/^\d{6}$/.test(p.slice(7, 13))) score += 1;
+    if (score > bestScore) { bestScore = score; best = p; }
+  }
+  const series4 = /^\d/.test(best) ? best[0] : "";
+  const issue = best.slice(1, 7), dept = best.slice(7, 13);
+  const iso = (yymmdd: string, pivot: number) => {
+    if (!/^\d{6}$/.test(yymmdd)) return null;
+    const yy = +yymmdd.slice(0, 2), mm = +yymmdd.slice(2, 4), dd = +yymmdd.slice(4, 6);
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+    return `${yy > pivot ? 1900 + yy : 2000 + yy}-${yymmdd.slice(2, 4)}-${yymmdd.slice(4, 6)}`;
+  };
+  return {
+    valid,
+    series: docField.slice(0, 3) + series4,
+    number: docField.slice(3, 9),
+    birth_date: iso(birth, new Date().getFullYear() % 100),
+    issue_date: iso(issue, 96),
+    dept_code: /^\d{6}$/.test(dept) ? dept.slice(0, 3) + "-" + dept.slice(3) : null,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -88,36 +156,50 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "нет изображения" }), { status: 400, headers: cors });
     }
 
-    const yaResp = await fetch("https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText", {
-      method: "POST",
-      headers: {
-        "Authorization": `Api-Key ${apiKey}`,
-        "x-folder-id": folderId,
-        "x-data-logging-enabled": "false", // не сохранять ПДн в логах Яндекса
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        mimeType: media_type === "image/png" ? "PNG" : "JPEG",
-        languageCodes: ["ru"],
-        model: "passport",
-        content: image,
-      }),
-    });
+    // Два параллельных запроса: «passport» даёт разобранные поля,
+    // «page» — полный текст страницы (нужен для «Кем выдан»: паспортная
+    // модель fullText не возвращает).
+    const ycOcr = (model: string) =>
+      fetch("https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText", {
+        method: "POST",
+        headers: {
+          "Authorization": `Api-Key ${apiKey}`,
+          "x-folder-id": folderId,
+          "x-data-logging-enabled": "false", // не сохранять ПДн в логах Яндекса
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mimeType: media_type === "image/png" ? "PNG" : "JPEG",
+          languageCodes: ["ru"],
+          model,
+          content: image,
+        }),
+      });
 
-    if (!yaResp.ok) {
-      const detail = await yaResp.text();
+    const [passResp, pageResp] = await Promise.all([ycOcr("passport"), ycOcr("page")]);
+
+    if (!passResp.ok) {
+      const detail = await passResp.text();
       return new Response(
-        JSON.stringify({ error: `Yandex OCR ${yaResp.status}: ${detail.slice(0, 300)}` }),
+        JSON.stringify({ error: `Yandex OCR ${passResp.status}: ${detail.slice(0, 300)}` }),
         { status: 502, headers: cors },
       );
     }
 
-    const payload = await yaResp.json();
+    const payload = await passResp.json();
     const annotation = payload?.result?.textAnnotation ?? payload?.result?.text_annotation;
     if (!annotation) {
       return new Response(JSON.stringify({ error: "пустой ответ Yandex OCR" }), {
         status: 502, headers: cors,
       });
+    }
+
+    // Полный текст: из «page», при неудаче — что есть у «passport»
+    let pageText = "";
+    if (pageResp.ok) {
+      const pagePayload = await pageResp.json().catch(() => null);
+      const pageAnn = pagePayload?.result?.textAnnotation ?? pagePayload?.result?.text_annotation;
+      pageText = pageAnn?.fullText ?? pageAnn?.full_text ?? "";
     }
 
     const entities: Record<string, string> = {};
@@ -126,7 +208,7 @@ Deno.serve(async (req) => {
     }
 
     const digits = (entities.number || "").replace(/\D/g, "");
-    const fullText: string = annotation.fullText ?? annotation.full_text ?? "";
+    const fullText: string = pageText || annotation.fullText || annotation.full_text || "";
     const subdivision = (entities.subdivision || "").replace(/\D/g, "");
 
     const data = {
@@ -143,11 +225,30 @@ Deno.serve(async (req) => {
       confidence: "high" as string,
     };
 
+    // МЧЗ с сошедшимися контрольными цифрами перекрывает визуальную догадку модели
+    const mrz = parseMrzFromText(fullText);
+    if (mrz && mrz.valid) {
+      if (mrz.series.length === 4 && /^\d{6}$/.test(mrz.number)) {
+        data.series = mrz.series;
+        data.number = mrz.number;
+      }
+      if (mrz.birth_date) data.birth_date = mrz.birth_date;
+      if (mrz.issue_date) data.issue_date = mrz.issue_date;
+      if (mrz.dept_code) data.dept_code = mrz.dept_code;
+    } else if (mrz) {
+      // контрольные цифры не сошлись — только дозаполняем пустое
+      if (!data.series && mrz.series.length === 4) { data.series = mrz.series; data.number = mrz.number; }
+      if (!data.birth_date) data.birth_date = mrz.birth_date;
+      if (!data.issue_date) data.issue_date = mrz.issue_date;
+      if (!data.dept_code) data.dept_code = mrz.dept_code;
+    }
+
     // Ключевые поля не распознались — честно понижаем уверенность
-    const key = [data.last_name, data.first_name, data.series, data.number, data.issue_date];
+    const key = [data.last_name, data.first_name, data.series, data.number, data.issue_date, data.birth_date];
     const missing = key.filter((v) => !v).length;
     if (missing >= 3) data.confidence = "low";
     else if (missing > 0 || !data.dept_code) data.confidence = "medium";
+    else if (mrz && mrz.valid) data.confidence = "high";
 
     const body: Record<string, unknown> = { data };
     if (debug === true) {
