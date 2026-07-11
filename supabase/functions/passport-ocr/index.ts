@@ -35,9 +35,21 @@ function isoDate(s: string | null): string | null {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
 }
 
-// «Кем выдан» не выделяется моделью отдельным полем — берём его из полного
-// текста верхней страницы: строки до «Дата выдачи»/даты, без служебных надписей.
+// «Кем выдан» не выделяется моделью отдельным полем — достаём из полного текста.
+// Основной способ: сегмент между «Паспорт выдан» и «Дата выдачи»/датой.
+// Запасной: строки верхней части страницы до первой служебной надписи.
 function extractIssuedBy(fullText: string): string | null {
+  const clean = (s: string) =>
+    s.split("\n").map((l) => l.trim()).filter(Boolean)
+      .filter((l) => l.replace(/[^а-яёА-ЯЁ]/g, "").length >= 3)
+      .join(" ").replace(/\s+/g, " ").trim();
+
+  const seg = fullText.match(/паспорт\s*выдан([\s\S]*?)(дата\s*выдачи|код\s*подразделения|\d{2}\.\d{2}\.\d{4})/i);
+  if (seg) {
+    const text = clean(seg[1]);
+    if (text.length >= 8) return text;
+  }
+
   const lines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
   const out: string[] = [];
   for (const line of lines) {

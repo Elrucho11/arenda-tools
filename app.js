@@ -1191,37 +1191,51 @@
       };
       try {
         // 1) Облако: нейросеть читает всю страницу, включая «Кем выдан»
-        let cloudOk = false;
+        let cloud = null;
         try {
           scanBtn.textContent = 'Распознаю в облаке…';
-          const c = await recognizePassportCloud(file);
-          if (c && (c.last_name || c.series)) {
-            const fio = [c.last_name, c.first_name, c.middle_name].filter(Boolean).join(' ');
-            if (fio) el('renter').value = fio;
-            if (c.series && c.number) el('passSeries').value = fmtPassSeries(c.series + c.number);
-            if (c.issue_date) el('passIssuedAt').value = c.issue_date;
-            if (c.issued_by) el('passIssuedBy').value = c.issued_by;
-            if (c.dept_code) el('passDeptCode').value = fmtDeptCode(c.dept_code);
-            if (c.birth_date) el('birthDate').value = c.birth_date;
-            form.querySelector('.pass-details').open = true;
-            cloudOk = true;
-            if (c.confidence === 'high') toast('Паспорт распознан');
-            else toast('Распознано — проверьте данные (фото не идеальное)', 'err');
-          }
+          cloud = await recognizePassportCloud(file);
         } catch (cloudErr) {
           console.warn('Облачное распознавание не сработало, локальный запасной вариант:', cloudErr);
         }
-        if (cloudOk) return;
+        if (cloud && (cloud.last_name || cloud.series)) {
+          const fio = [cloud.last_name, cloud.first_name, cloud.middle_name].filter(Boolean).join(' ');
+          if (fio) el('renter').value = fio;
+          if (cloud.series && cloud.number) el('passSeries').value = fmtPassSeries(cloud.series + cloud.number);
+          if (cloud.issue_date) el('passIssuedAt').value = cloud.issue_date;
+          if (cloud.issued_by) el('passIssuedBy').value = cloud.issued_by;
+          if (cloud.dept_code) el('passDeptCode').value = fmtDeptCode(cloud.dept_code);
+          if (cloud.birth_date) el('birthDate').value = cloud.birth_date;
+          form.querySelector('.pass-details').open = true;
+          const complete = cloud.last_name && cloud.first_name && cloud.series && cloud.number && cloud.issue_date;
+          if (complete && cloud.confidence === 'high') { toast('Паспорт распознан'); return; }
+          if (complete) { toast('Распознано — проверьте данные (фото не идеальное)', 'err'); return; }
+          // облако прочитало не всё — дочитываем недостающее по МЧЗ локально
+        }
 
-        // 2) Запасной вариант: локальный OCR по МЧЗ (работает офлайн)
+        // 2) Локальный OCR по МЧЗ: запасной вариант офлайн и «дочитывание» за облаком.
+        //    Заполняет только пустые поля; если контрольные цифры МЧЗ сошлись —
+        //    серия/номер и даты из МЧЗ надёжнее облачной догадки и перекрывают её.
         const p = await recognizePassport(file);
-        if (!p) { toast('Не удалось прочитать МЧЗ — попробуйте более чёткое фото', 'err'); return; }
+        if (!p) {
+          if (!cloud) toast('Не удалось прочитать МЧЗ — попробуйте более чёткое фото', 'err');
+          else toast('Распознано не полностью — проверьте данные', 'err');
+          return;
+        }
         const fio = [p.lastName, p.firstName, p.midName].filter(Boolean).join(' ');
-        if (fio) el('renter').value = fio;
-        if (p.series.length === 4 && p.number) el('passSeries').value = p.series + ' ' + p.number;
-        if (p.issueDate) el('passIssuedAt').value = p.issueDate;
-        if (p.deptCode) el('passDeptCode').value = p.deptCode;
-        if (p.birthDate) el('birthDate').value = p.birthDate;
+        const curFio = el('renter').value.trim();
+        if (fio && fio.split(' ').length > (curFio ? curFio.split(' ').length : 0)) el('renter').value = fio;
+        const setIfEmpty = (n, v) => { if (v && !el(n).value) el(n).value = v; };
+        if (p.valid && p.series.length === 4 && p.number) {
+          el('passSeries').value = p.series + ' ' + p.number; // подтверждено контрольными цифрами
+        } else if (p.series.length === 4 && p.number) {
+          setIfEmpty('passSeries', p.series + ' ' + p.number);
+        }
+        if (p.valid && p.issueDate) el('passIssuedAt').value = p.issueDate;
+        else setIfEmpty('passIssuedAt', p.issueDate);
+        setIfEmpty('passDeptCode', p.deptCode);
+        if (p.valid && p.birthDate) el('birthDate').value = p.birthDate;
+        else setIfEmpty('birthDate', p.birthDate);
         form.querySelector('.pass-details').open = true;
         if (p.valid) toast('Паспорт распознан');
         else toast('Распознано не полностью — проверьте данные', 'err');
