@@ -241,7 +241,7 @@ body { background: var(--gray-light); padding-bottom: 90px; }
 .overdue-banner { background: #fde8e8; color: #dc2626; font-weight: 700; padding: 10px 14px; border-radius: var(--radius-sm); margin-bottom: 12px; font-size: .92rem; }
 
 /* ---------- Фото инструмента ---------- */
-.tool-card__photo { height: 140px; margin: -16px -16px 4px; background-size: cover; background-position: center; border-radius: var(--radius) var(--radius) 0 0; }
+.tool-card__photo { height: 200px; margin: -16px -16px 4px; background-size: contain; background-position: center; background-color: #fff; background-repeat: no-repeat; border-radius: var(--radius) var(--radius) 0 0; }
 .photo-box { text-align: center; }
 .photo-box h3 { margin-bottom: 12px; }
 .photo-box__img { width: 100%; border-radius: var(--radius-sm); display: block; margin-bottom: 12px; }
