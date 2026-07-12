@@ -23,3 +23,13 @@ grant all on public.tools to anon, authenticated;
 -- Мгновенные обновления на всех устройствах (realtime).
 -- Если выдаст "table is already member" — это нормально, просто игнорируйте.
 alter publication supabase_realtime add table public.tools;
+
+-- ===== v22: аккаунты и роли (применено 2026-07-11 через management API) =====
+-- Таблица профилей сотрудников; аккаунты создаёт только администратор
+-- (auth: mailer_autoconfirm=true, disable_signup=true).
+-- profiles: id/email/name/role(admin|manager); RLS: читать — вошедшим с профилем,
+-- обновлять — только своё имя (grant update(name)).
+-- tools: select/insert/update — вошедшим с профилем; delete — только админ.
+-- Функции: is_admin(), has_profile() (security definer).
+-- Управление аккаунтами: Edge Function admin-users (service role):
+-- status/bootstrap/create/list/set_role/reset_password/delete.

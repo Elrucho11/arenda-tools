@@ -130,34 +130,104 @@
   const nowISO = () => new Date().toISOString();
   const todayInput = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
-  // ---------- Роли: менеджер (по умолчанию) и администратор ----------
-  // Менеджер: каталог, сканер, выдача, возврат, ТО, фото, аналитика.
-  // Администратор (вход по PIN): + добавление/правка/удаление инструмента,
-  // копии, инвентарные номера, наклейки, ручная смена статуса.
-  // PIN хранится в общей облачной базе (документ «_settings») — один на всех.
-  // Имя менеджера хранится на устройстве и подписывает выдачи/возвраты/ТО.
-  const ROLE_KEY = 'arenda-role';
-  const NAME_KEY = 'arenda-manager';
-  const isAdmin = () => localStorage.getItem(ROLE_KEY) === 'admin';
-  const managerName = () => (localStorage.getItem(NAME_KEY) || '').trim();
-  const settingsDoc = () => store.data.tools.find(t => t.id === '_settings');
-  const getAdminPin = () => { const s = settingsDoc(); return (s && s.adminPin) || ''; };
-  function saveAdminPin(pin) {
-    if (settingsDoc()) {
-      store.update('_settings', { adminPin: pin });
-    } else {
-      const doc = { id: '_settings', adminPin: pin, createdAt: nowISO() };
-      store.data.tools.push(doc); store.save(); sync.push(doc);
+  // ---------- Аккаунты и роли ----------
+  // Вход обязателен. Аккаунты создаёт администратор (самостоятельной
+  // регистрации нет). Роли: admin — полное управление парком,
+  // manager — каталог, сканер, выдача, возврат, ТО, фото, аналитика.
+  // Профиль кешируется локально, чтобы приложение работало офлайн.
+  const PROFILE_KEY = 'arenda-profile';
+  let currentProfile = null; // {id, email, name, role}
+  const isAdmin = () => !!currentProfile && currentProfile.role === 'admin';
+  const managerName = () => (currentProfile && currentProfile.name) || '';
+  const ADMIN_FN = () => (window.APP_CONFIG.SUPABASE_URL || '') + '/functions/v1/admin-users';
+
+  async function authToken() {
+    if (!sync.client) return '';
+    const { data } = await sync.client.auth.getSession();
+    return data && data.session ? data.session.access_token : '';
+  }
+  async function adminApi(payload) {
+    const token = await authToken();
+    const resp = await fetch(ADMIN_FN(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': window.APP_CONFIG.SUPABASE_ANON_KEY || '',
+        ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.error) throw new Error(data.error || ('HTTP ' + resp.status));
+    return data;
+  }
+  async function loadProfile(userId) {
+    try {
+      const { data, error } = await sync.client.from('profiles')
+        .select('id,email,name,role').eq('id', userId).single();
+      if (error) throw error;
+      currentProfile = data;
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(data));
+    } catch (e) {
+      // офлайн — берём кешированный профиль этого же пользователя
+      try {
+        const cached = JSON.parse(localStorage.getItem(PROFILE_KEY));
+        if (cached && cached.id === userId) currentProfile = cached;
+      } catch {}
     }
+    return currentProfile;
   }
   function updateUserBtn() {
     const nameEl = document.getElementById('userBtnName');
     const btn = document.getElementById('userBtn');
     if (!nameEl || !btn) return;
     const name = managerName();
-    nameEl.textContent = name ? name.split(' ')[0] : 'Кто вы?';
+    nameEl.textContent = name ? name.split(' ')[0] : 'Вход';
     btn.classList.toggle('is-admin', isAdmin());
-    btn.title = (name || 'Представьтесь') + ' · режим: ' + (isAdmin() ? 'администратор' : 'менеджер');
+    btn.title = name
+      ? name + ' · ' + (isAdmin() ? 'администратор' : 'менеджер')
+      : 'Вход';
+  }
+
+  // Экран входа / первичной настройки (рисуется вместо приложения)
+  function renderAuthScreen(needsBootstrap) {
+    const view = document.getElementById('view');
+    view.innerHTML = `
+      <div class="auth-wrap">
+        <div class="panel auth-panel">
+          <span class="eyebrow">${needsBootstrap ? 'Первичная настройка' : 'Вход для сотрудников'}</span>
+          <h2 style="margin:8px 0 4px">${needsBootstrap ? 'Создайте аккаунт <span style="color:var(--orange)">администратора</span>' : 'Войдите в <span style="color:var(--orange)">приложение</span>'}</h2>
+          <p class="tool-card__cat" style="margin:0 0 16px">${needsBootstrap
+            ? 'Это первый запуск: аккаунт станет администратором. Менеджеров вы добавите потом в своём профиле.'
+            : 'Аккаунт выдаёт администратор. Нет аккаунта — обратитесь к нему.'}</p>
+          <form id="authForm">
+            ${needsBootstrap ? field('Ваше имя *', `<input name="aname" required placeholder="Павел">`) : ''}
+            ${field('Почта (логин) *', `<input name="aemail" type="email" required placeholder="pavel@arenda.ru" autocomplete="username">`)}
+            ${field('Пароль *', `<input name="apass" type="password" required minlength="6" placeholder="Минимум 6 символов" autocomplete="current-password">`)}
+            <button class="btn btn--primary btn--block" type="submit">${needsBootstrap ? 'Создать и войти' : 'Войти'}</button>
+          </form>
+        </div>
+      </div>
+    `;
+    $('#authForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const email = f.get('aemail').trim();
+      const password = f.get('apass');
+      const btn = e.target.querySelector('button[type=submit]');
+      btn.disabled = true; btn.textContent = 'Секунду…';
+      try {
+        if (needsBootstrap) {
+          await adminApi({ action: 'bootstrap', email, password, name: f.get('aname').trim() });
+        }
+        const { error } = await sync.client.auth.signInWithPassword({ email, password });
+        if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Неверная почта или пароль' : error.message);
+        location.reload();
+      } catch (err) {
+        toast(err.message, 'err');
+        btn.disabled = false; btn.textContent = needsBootstrap ? 'Создать и войти' : 'Войти';
+      }
+    });
   }
 
   // ---------- Векторные иконки (единый линейный стиль) ----------
@@ -1072,6 +1142,7 @@
     const url = window.APP_CONFIG && window.APP_CONFIG.CLOUD_OCR_URL;
     if (!url || !navigator.onLine) return null;
     const image = await fileToJpegBase64(file, rotateDeg);
+    const token = await authToken();
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 60000);
@@ -1081,6 +1152,7 @@
         headers: {
           'Content-Type': 'application/json',
           'apikey': window.APP_CONFIG.SUPABASE_ANON_KEY || '',
+          ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
         },
         body: JSON.stringify({ image, media_type: 'image/jpeg', mode: mode || undefined }),
         signal: controller.signal,
@@ -1172,72 +1244,117 @@
     return best;
   }
 
-  // Менеджер и режим работы устройства
-  function openUserForm(firstRun) {
+  // Профиль сотрудника: имя, выход; для администратора — управление сотрудниками
+  function openUserForm() {
+    if (!currentProfile) return;
     const admin = isAdmin();
-    const pinSet = !!getAdminPin();
     modal.open(`
-      <h2>${firstRun ? 'Представьтесь' : 'Менеджер и режим'}</h2>
-      ${firstRun ? `<p class="tool-card__cat" style="margin-top:-10px">Имя будет подписывать выдачи и возвраты с этого устройства.</p>` : ''}
+      <h2>Профиль</h2>
+      <p class="tool-card__cat" style="margin-top:-10px">${esc(currentProfile.email)} · ${admin ? 'администратор' : 'менеджер'}</p>
       <form id="userForm">
-        ${field('Ваше имя *', `<input name="mname" required value="${esc(managerName())}" placeholder="Александр">`)}
-        <button class="btn btn--primary btn--block" type="submit">Сохранить</button>
+        ${field('Ваше имя', `<input name="mname" required value="${esc(managerName())}" placeholder="Александр">`)}
+        <button class="btn btn--outline btn--sm btn--block" type="submit">Сохранить имя</button>
       </form>
+      <button class="btn btn--outline btn--sm btn--block" id="logoutBtn" style="margin-top:10px">Выйти из аккаунта</button>
+      ${admin ? `
       <div class="role-box">
-        <div class="role-box__row">
-          <span>Режим на этом устройстве:</span>
-          <b>${admin ? 'Администратор' : 'Менеджер'}</b>
-        </div>
-        ${admin ? `
-          <button class="btn btn--outline btn--sm btn--block" id="roleLogout">Выйти в режим менеджера</button>
-          <div class="field" style="margin-top:12px">
-            <label>Сменить PIN администратора</label>
-            <input id="newPin" inputmode="numeric" placeholder="Новый PIN (4–8 цифр)">
+        <div class="role-box__row"><b>Сотрудники</b></div>
+        <div id="staffList" class="staff-list"><p class="tool-card__cat">Загружаю…</p></div>
+        <form id="staffAdd" style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
+          <div class="role-box__row"><b>Новый сотрудник</b></div>
+          ${field('Имя *', `<input name="sname" required placeholder="Александр">`)}
+          <div class="field-row">
+            ${field('Почта (логин) *', `<input name="semail" type="email" required placeholder="sasha@arenda.ru">`)}
+            ${field('Пароль *', `<input name="spass" required minlength="6" placeholder="От 6 символов">`)}
           </div>
-          <button class="btn btn--outline btn--sm btn--block" id="pinChange">Сменить PIN</button>
-        ` : `
-          <div class="field" style="margin-top:12px">
-            <label>${pinSet ? 'PIN администратора' : 'PIN ещё не задан — придумайте и введите новый'}</label>
-            <input id="adminPin" inputmode="numeric" placeholder="${pinSet ? 'PIN' : 'Новый PIN (4–8 цифр)'}">
-          </div>
-          <button class="btn btn--outline btn--sm btn--block" id="roleLogin">${pinSet ? 'Войти как администратор' : 'Задать PIN и включить режим администратора'}</button>
-        `}
-      </div>
+          ${field('Роль', `<select name="srole"><option value="manager">Менеджер</option><option value="admin">Администратор</option></select>`)}
+          <button class="btn btn--primary btn--block" type="submit">Создать аккаунт</button>
+        </form>
+      </div>` : ''}
     `);
-    $('#userForm').addEventListener('submit', (e) => {
+    $('#userForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const name = new FormData(e.target).get('mname').trim();
       if (!name) return;
-      localStorage.setItem(NAME_KEY, name);
-      updateUserBtn();
-      modal.close();
-      toast('Сохранено: ' + name);
+      try {
+        const { error } = await sync.client.from('profiles').update({ name }).eq('id', currentProfile.id);
+        if (error) throw error;
+        currentProfile.name = name;
+        localStorage.setItem(PROFILE_KEY, JSON.stringify(currentProfile));
+        updateUserBtn(); toast('Имя сохранено');
+      } catch (err) { toast('Не удалось сохранить: ' + err.message, 'err'); }
     });
-    if ($('#roleLogin')) $('#roleLogin').addEventListener('click', () => {
-      const pin = $('#adminPin').value.trim();
-      const saved = getAdminPin();
-      if (!saved) {
-        if (!/^\d{4,8}$/.test(pin)) { toast('PIN — от 4 до 8 цифр', 'err'); return; }
-        saveAdminPin(pin);
-        localStorage.setItem(ROLE_KEY, 'admin');
-        modal.close(); toast('PIN задан, режим администратора включён'); updateUserBtn(); router();
-      } else if (pin === saved) {
-        localStorage.setItem(ROLE_KEY, 'admin');
-        modal.close(); toast('Режим администратора включён'); updateUserBtn(); router();
-      } else {
-        toast('Неверный PIN', 'err');
-      }
+    $('#logoutBtn').addEventListener('click', async () => {
+      try { await sync.client.auth.signOut(); } catch {}
+      localStorage.removeItem(PROFILE_KEY);
+      location.reload();
     });
-    if ($('#roleLogout')) $('#roleLogout').addEventListener('click', () => {
-      localStorage.setItem(ROLE_KEY, 'manager');
-      modal.close(); toast('Режим менеджера'); updateUserBtn(); router();
-    });
-    if ($('#pinChange')) $('#pinChange').addEventListener('click', () => {
-      const pin = $('#newPin').value.trim();
-      if (!/^\d{4,8}$/.test(pin)) { toast('PIN — от 4 до 8 цифр', 'err'); return; }
-      saveAdminPin(pin);
-      modal.close(); toast('PIN изменён');
-    });
+    if (admin) loadStaffList();
+  }
+
+  async function loadStaffList() {
+    const box = $('#staffList');
+    if (!box) return;
+    try {
+      const { users } = await adminApi({ action: 'list' });
+      box.innerHTML = users.map(u => `
+        <div class="staff-row" data-id="${u.id}">
+          <div class="staff-row__info">
+            <b>${esc(u.name)}</b>
+            <span>${esc(u.email)} · ${u.role === 'admin' ? 'администратор' : 'менеджер'}</span>
+          </div>
+          ${u.id === currentProfile.id ? '<span class="tool-card__cat">это вы</span>' : `
+          <div class="staff-row__actions">
+            <button class="btn btn--outline btn--sm" data-act="role">${u.role === 'admin' ? 'Сделать менеджером' : 'Сделать админом'}</button>
+            <button class="btn btn--outline btn--sm" data-act="pass">Пароль</button>
+            <button class="btn btn--outline btn--sm" data-act="del" style="color:#dc2626;border-color:#f3c2c2">Удалить</button>
+          </div>`}
+        </div>`).join('') || '<p class="tool-card__cat">Пока только вы.</p>';
+      box.onclick = async (e) => {
+        const btn = e.target.closest('[data-act]'); if (!btn) return;
+        const row = btn.closest('.staff-row');
+        const id = row.dataset.id;
+        const u = users.find(x => x.id === id); if (!u) return;
+        try {
+          if (btn.dataset.act === 'role') {
+            await adminApi({ action: 'set_role', id, role: u.role === 'admin' ? 'manager' : 'admin' });
+            toast('Роль изменена'); loadStaffList();
+          } else if (btn.dataset.act === 'pass') {
+            const p = prompt('Новый пароль для «' + u.name + '» (от 6 символов):');
+            if (p === null) return;
+            await adminApi({ action: 'reset_password', id, password: p });
+            toast('Пароль обновлён — сообщите его сотруднику');
+          } else if (btn.dataset.act === 'del') {
+            if (!confirm('Удалить аккаунт «' + u.name + '»?')) return;
+            await adminApi({ action: 'delete', id });
+            toast('Аккаунт удалён'); loadStaffList();
+          }
+        } catch (err) { toast(err.message, 'err'); }
+      };
+    } catch (err) {
+      box.innerHTML = `<p class="tool-card__cat">Не удалось загрузить: ${esc(err.message)}</p>`;
+    }
+    // форма создания
+    const form = $('#staffAdd');
+    if (form && !form.dataset.wired) {
+      form.dataset.wired = '1';
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = new FormData(e.target);
+        try {
+          await adminApi({
+            action: 'create',
+            name: f.get('sname').trim(),
+            email: f.get('semail').trim(),
+            password: f.get('spass'),
+            role: f.get('srole'),
+          });
+          toast('Аккаунт создан — сообщите сотруднику логин и пароль');
+          e.target.reset();
+          loadStaffList();
+        } catch (err) { toast(err.message, 'err'); }
+      });
+    }
   }
 
   function openRentForm(t) {
@@ -1682,6 +1799,7 @@
   //  СКАНЕР QR
   // =========================================================
   function openScanner() {
+    if (!currentProfile) { toast('Сначала войдите в аккаунт', 'err'); return; }
     modal.open(`
       <h2>Сканировать QR</h2>
       <div id="reader"></div>
@@ -1794,23 +1912,45 @@
   }
 
   // ---------- Старт ----------
-  $('#userBtn').addEventListener('click', () => openUserForm(false));
+  $('#userBtn').addEventListener('click', () => { if (currentProfile) openUserForm(); });
 
   async function start() {
-    store.load();                       // мгновенный рендер из локального кэша
-    render(true);
-    updateUserBtn();
-    // Первое включение на устройстве — просим представиться,
-    // чтобы выдачи и возвраты были подписаны
-    if (!managerName()) setTimeout(() => openUserForm(true), 600);
+    store.load();
 
     const synced = await sync.init();
-    if (!synced) {                      // бэкенд не настроен — локальный режим (как раньше)
+    if (!synced) {                      // бэкенд не настроен — локальный режим без входа
+      currentProfile = { id: 'local', email: '', name: 'Локальный режим', role: 'admin' };
+      updateUserBtn();
+      render(true);
       ensureCatalog();
       setStatus('local');
       render(false);
       return;
     }
+
+    // ---- Вход обязателен ----
+    const { data: sessData } = await sync.client.auth.getSession();
+    const session = sessData && sessData.session;
+    if (!session) {
+      let needsBootstrap = false;
+      try { needsBootstrap = !!(await adminApi({ action: 'status' })).needsBootstrap; } catch {}
+      setStatus('local');
+      renderAuthScreen(needsBootstrap);
+      return;
+    }
+    sync.client.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') { localStorage.removeItem(PROFILE_KEY); location.reload(); }
+    });
+    await loadProfile(session.user.id);
+    if (!currentProfile) {
+      // аккаунт без профиля (удалён администратором) — выходим
+      try { await sync.client.auth.signOut(); } catch {}
+      localStorage.removeItem(PROFILE_KEY);
+      renderAuthScreen(false);
+      return;
+    }
+    updateUserBtn();
+    render(true);                       // мгновенный рендер из локального кэша
 
     try {
       const remote = await sync.pullAll();

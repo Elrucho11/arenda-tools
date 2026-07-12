@@ -280,6 +280,21 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Распознавание доступно только вошедшим сотрудникам
+    const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!token) {
+      return new Response(JSON.stringify({ error: "Требуется вход" }), { status: 401, headers: cors });
+    }
+    const uResp = await fetch(`${Deno.env.get("SUPABASE_URL")}/auth/v1/user`, {
+      headers: {
+        "apikey": Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+        "Authorization": `Bearer ${token}`,
+      },
+    });
+    if (!uResp.ok) {
+      return new Response(JSON.stringify({ error: "Требуется вход" }), { status: 401, headers: cors });
+    }
+
     const apiKey = Deno.env.get("YANDEX_API_KEY");
     const folderId = Deno.env.get("YANDEX_FOLDER_ID");
     if (!apiKey || !folderId) {
