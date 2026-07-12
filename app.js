@@ -355,6 +355,29 @@
     return '—';
   }
 
+  // ---------- Деньги ----------
+  const fmtMoney = (n) => Number(n || 0).toLocaleString('ru-RU') + ' ₽';
+  // Сутки аренды: каждые начатые 24 часа, минимум 1
+  function rentalDays(r) {
+    const from = new Date(r.takenAt).getTime();
+    const to = r.returnedAt ? new Date(r.returnedAt).getTime() : Date.now();
+    return Math.max(1, Math.ceil((to - from) / 86400000));
+  }
+  function rentalCost(t, r) {
+    const price = parseFloat(t.dailyPrice);
+    return price > 0 ? rentalDays(r) * price : 0;
+  }
+
+  // ---------- ТО по наработке ----------
+  // Норма «ТО каждые N аренд» (t.maintEvery) и сколько выдач было после последнего ТО
+  function maintInfo(t) {
+    const every = parseInt(t.maintEvery, 10);
+    if (!every || every < 1) return null;
+    const lastMaint = (t.maintenance || []).reduce((m, x) => ((x.date || '') > m ? x.date : m), '');
+    const used = (t.rentals || []).filter(r => !lastMaint || (r.takenAt || '').slice(0, 10) > lastMaint).length;
+    return { every, used, due: used >= every };
+  }
+
   // ---------- Просрочка ----------
   // Местная дата (а не UTC) — иначе срок сравнивается криво около полуночи.
   function todayStr() {
@@ -579,6 +602,7 @@
             ${t.inventoryNo ? `<span>№ ${esc(t.inventoryNo)}</span>` : ''}
             ${(t.dailyPrice || t.priceText) ? `<span>${priceLabel(t)}</span>` : ''}
             <span>Аренд: ${(t.rentals || []).length}</span>
+            ${(() => { const mi = maintInfo(t); return mi ? `<span class="${mi.due ? 'maint-due' : ''}">ТО: ${mi.used}/${mi.every}</span>` : ''; })()}
           </div>
         </article>`;
     }).join('');
@@ -642,6 +666,7 @@
         <div>
           <div class="panel">
             <h3>Действия</h3>
+            ${(() => { const mi = maintInfo(t); return (mi && mi.due) ? `<div class="overdue-banner">${icon('wrench')} Наработка ${mi.used} из ${mi.every} аренд — проведите ТО, выдача заблокирована.</div>` : ''; })()}
             <div class="actions-row">
               ${t.status === 'available'
                 ? `<button class="btn btn--primary" id="actRent">${icon('handout')} Выдать в аренду</button>`
@@ -687,12 +712,17 @@
               ${cur.passport?.regAddress ? `<dt>Регистрация</dt><dd>${esc(cur.passport.regAddress)}</dd>` : ''}
               <dt>Объект</dt><dd>${esc(cur.site || '—')}</dd>
               <dt>Выдан</dt><dd>${fmtDateTime(cur.takenAt)}${cur.manager ? ' · ' + esc(cur.manager) : ''}</dd>
-              <dt>Вернуть до</dt><dd style="${isOverdue(t) ? 'color:#dc2626;font-weight:800' : ''}">${fmtDate(cur.dueAt)}</dd>
+              <dt>Вернуть до</dt><dd style="${isOverdue(t) ? 'color:#dc2626;font-weight:800' : ''}">${fmtDate(cur.dueAt)}${(cur.extensions || []).length ? ' (продлевалась)' : ''}</dd>
+              <dt>Дней в аренде</dt><dd>${rentalDays(cur)}</dd>
+              ${rentalCost(t, cur) ? `<dt>Начислено</dt><dd><b>${fmtMoney(rentalCost(t, cur))}</b></dd>` : ''}
             </dl>
+            <div class="actions-row" style="margin-top:12px">
+              <button class="btn btn--outline btn--sm" id="actExtend">${icon('alarm')} Продлить аренду</button>
+            </div>
           </div>` : ''}
 
           <div class="panel">
-            <h3>${icon('wrench')} История ТО (${(t.maintenance || []).length})</h3>
+            <h3>${icon('wrench')} История ТО (${(t.maintenance || []).length})${(() => { const mi = maintInfo(t); return mi ? ` <span class="tool-card__cat" style="font-weight:600">· наработка ${mi.used} из ${mi.every}</span>` : ''; })()}</h3>
             ${renderMaintenance(t)}
           </div>
 
@@ -721,6 +751,7 @@
 
     if ($('#actRent')) $('#actRent').addEventListener('click', () => openRentForm(t));
     if ($('#actReturn')) $('#actReturn').addEventListener('click', () => openReturnForm(t));
+    if ($('#actExtend')) $('#actExtend').addEventListener('click', () => openExtendForm(t));
     $('#actMaint').addEventListener('click', () => openMaintForm(t));
     if ($('#actStatus')) $('#actStatus').addEventListener('click', () => openStatusForm(t));
     if ($('#actEdit')) $('#actEdit').addEventListener('click', () => openToolForm(t));
@@ -767,6 +798,8 @@
       <li${!r.returnedAt ? ' style="border-color:var(--orange)"' : ''}>
         <div class="timeline__date">${fmtDateTime(r.takenAt)} ${r.returnedAt ? '→ ' + fmtDateTime(r.returnedAt) : '· <b style="color:var(--orange)">не возвращён</b>'}</div>
         <div class="timeline__title">${icon('user')} ${esc(r.renter)}${r.phone ? ' · ' + esc(r.phone) : ''}</div>
+        ${r.amount != null ? `<div class="timeline__sub">${fmtMoney(r.amount)} за ${rentalDays(r)} сут.${r.paid === false ? ' · <b style="color:#dc2626">не оплачено</b>' : ''}</div>` : ''}
+        ${(r.extensions || []).length ? `<div class="timeline__sub">Продлевалась: ${r.extensions.map(x => 'до ' + fmtDate(x.to)).join(', ')}</div>` : ''}
         ${r.passport?.series ? `<div class="timeline__sub">Паспорт: ${esc(r.passport.series)}</div>` : ''}
         ${(r.manager || r.returnedBy) ? `<div class="timeline__sub">${r.manager ? 'Выдал: ' + esc(r.manager) : ''}${r.manager && r.returnedBy ? ' · ' : ''}${r.returnedBy ? 'Принял: ' + esc(r.returnedBy) : ''}</div>` : ''}
         ${r.site ? `<div class="timeline__sub">Объект: ${esc(r.site)}</div>` : ''}
@@ -802,6 +835,30 @@
     const totalRentals = tools.reduce((s, t) => s + (t.rentals || []).length, 0);
     const utilPct = tools.length ? Math.round(rented.length / tools.length * 100) : 0;
 
+    // Касса: суммы из закрытых аренд (по местной дате возврата)
+    const localDay = (iso) => {
+      const d = new Date(iso);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const today = todayStr();
+    const rev = { today: 0, week: 0, month: 0, total: 0, debt: 0 };
+    tools.forEach(t => (t.rentals || []).forEach(r => {
+      if (r.amount == null) return;
+      if (r.paid === false) { rev.debt += r.amount; return; }
+      rev.total += r.amount;
+      const dstr = localDay(r.returnedAt || r.takenAt);
+      const age = (new Date(today) - new Date(dstr)) / 86400000;
+      if (dstr === today) rev.today += r.amount;
+      if (age < 7) rev.week += r.amount;
+      if (age < 30) rev.month += r.amount;
+    }));
+    const byRevenue = tools.map(t => ({
+      t, sum: (t.rentals || []).reduce((s, r) => s + ((r.paid !== false && r.amount) ? r.amount : 0), 0),
+    })).filter(x => x.sum > 0).sort((a, b) => b.sum - a.sum).slice(0, 8);
+
+    // Пора на ТО
+    const maintDue = tools.map(t => ({ t, mi: maintInfo(t) })).filter(x => x.mi && x.mi.due);
+
     view.innerHTML = `
       <a href="#/" class="back-link">← Назад к каталогу</a>
       <div class="page-head">
@@ -814,6 +871,15 @@
         <div class="stat"><div class="stat__num">${utilPct}%</div><div class="stat__label">Занятость парка</div></div>
         <div class="stat"><div class="stat__num">${totalRentals}</div><div class="stat__label">Всего выдач</div></div>
         <div class="stat"><div class="stat__num">${neverUsed}</div><div class="stat__label">Ни разу не брали</div></div>
+      </div>
+
+      <h3 style="margin:18px 0 10px">${icon('trend')} Касса</h3>
+      <div class="stats">
+        <div class="stat"><div class="stat__num">${fmtMoney(rev.today)}</div><div class="stat__label">Сегодня</div></div>
+        <div class="stat"><div class="stat__num">${fmtMoney(rev.week)}</div><div class="stat__label">За 7 дней</div></div>
+        <div class="stat"><div class="stat__num">${fmtMoney(rev.month)}</div><div class="stat__label">За 30 дней</div></div>
+        <div class="stat"><div class="stat__num">${fmtMoney(rev.total)}</div><div class="stat__label">За всё время</div></div>
+        <div class="stat ${rev.debt ? 'stat--over' : ''}"><div class="stat__num">${fmtMoney(rev.debt)}</div><div class="stat__label">Долги (не оплачено)</div></div>
       </div>
 
       <div class="stats-cols">
@@ -838,6 +904,20 @@
           ${topRenters.length ? `<ul class="stat-list">${topRenters.map(r => `
             <li><div><b>${esc(r.name)}</b><div class="stat-list__sub">${r.current ? 'сейчас держит: ' + r.current : 'нет на руках'}</div></div><span class="count-pill">${r.total} выдач</span></li>`).join('')}</ul>`
             : `<p class="tool-card__cat">Пока нет данных по аренде.</p>`}
+        </div>
+
+        <div class="panel">
+          <h3>${icon('trend')} Доход по инструментам</h3>
+          ${byRevenue.length ? `<ul class="stat-list">${byRevenue.map(x => `
+            <li data-id="${x.t.id}"><div><b>${esc(x.t.name)}</b><div class="stat-list__sub">${(x.t.rentals || []).length} аренд</div></div><span class="count-pill">${fmtMoney(x.sum)}</span></li>`).join('')}</ul>`
+            : `<p class="tool-card__cat">Пока нет оплаченных возвратов — суммы появятся после первого возврата с указанной суммой.</p>`}
+        </div>
+
+        <div class="panel">
+          <h3>${icon('wrench')} Пора на ТО (${maintDue.length})</h3>
+          ${maintDue.length ? `<ul class="stat-list">${maintDue.map(x => `
+            <li data-id="${x.t.id}"><div><b>${esc(x.t.name)}</b>${x.t.inventoryNo ? ` · №${esc(x.t.inventoryNo)}` : ''}<div class="stat-list__sub">выдача заблокирована до отметки ТО</div></div><span class="over-pill">${x.mi.used}/${x.mi.every}</span></li>`).join('')}</ul>`
+            : `<p class="tool-card__cat">Наработка в норме у всех отслеживаемых.</p>`}
         </div>
 
         <div class="panel">
@@ -874,7 +954,10 @@
           ${field('Инвентарный №', `<input name="inventoryNo" value="${esc(t?.inventoryNo || '')}" placeholder="0042">`)}
           ${field('Цена, ₽/сут', `<input name="dailyPrice" type="number" min="0" value="${esc(t?.dailyPrice || '')}" placeholder="500">`)}
         </div>
-        ${field('Серийный №', `<input name="serialNo" value="${esc(t?.serialNo || '')}" placeholder="SN-12345">`)}
+        <div class="field-row">
+          ${field('Серийный №', `<input name="serialNo" value="${esc(t?.serialNo || '')}" placeholder="SN-12345">`)}
+          ${field('ТО каждые N аренд', `<input name="maintEvery" type="number" min="0" value="${esc(t?.maintEvery || '')}" placeholder="7">`, 'Пусто — не отслеживать')}
+        </div>
         ${field('Заметки', `<textarea name="notes" rows="2" placeholder="Комплект, особенности…">${esc(t?.notes || '')}</textarea>`)}
         <button class="btn btn--primary btn--block" type="submit">${isEdit ? 'Сохранить' : 'Добавить и создать QR'}</button>
       </form>
@@ -888,6 +971,7 @@
         inventoryNo: f.get('inventoryNo').trim(),
         serialNo: f.get('serialNo').trim(),
         dailyPrice: f.get('dailyPrice').trim(),
+        maintEvery: f.get('maintEvery').trim(),
         notes: f.get('notes').trim(),
       };
       if (!patch.name) return;
@@ -1470,6 +1554,12 @@
   }
 
   function openRentForm(t) {
+    const miGuard = maintInfo(t);
+    if (miGuard && miGuard.due) {
+      toast(`Наработка ${miGuard.used} из ${miGuard.every} аренд — сначала проведите ТО`, 'err');
+      openMaintForm(t);
+      return;
+    }
     const clients = clientsIndex();
     const names = Object.values(clients).map(c => c.name).sort((a, b) => a.localeCompare(b, 'ru'));
     modal.open(`
@@ -1688,10 +1778,21 @@
   function openReturnForm(t) {
     const cur = currentRental(t);
     if (!cur) { toast('Активная аренда не найдена', 'err'); return; }
+    const days = rentalDays(cur);
+    const price = parseFloat(t.dailyPrice) || 0;
+    const cost = rentalCost(t, cur);
     modal.open(`
       <h2>Принять возврат</h2>
       <p class="tool-card__cat" style="margin-top:-10px">${esc(t.name)} · от ${esc(cur.renter)}</p>
       <form id="retForm">
+        <div class="field-row">
+          ${field('Сумма к оплате, ₽', `<input name="amount" type="number" min="0" step="1" value="${cost || ''}">`,
+            price ? `${days} сут. × ${fmtMoney(price)} — можно поправить` : `${days} сут., тариф не задан`)}
+          ${field('Оплата', `<select name="paid">
+            <option value="1">Оплачено</option>
+            <option value="0">Не оплачено (долг)</option>
+          </select>`)}
+        </div>
         ${field('Состояние при возврате', `<select name="condition">
           <option value="ok">Исправен — в наличии</option>
           <option value="maintenance">Требует ТО</option>
@@ -1706,12 +1807,41 @@
       const f = new FormData(e.target);
       cur.returnedAt = nowISO();
       if (managerName()) cur.returnedBy = managerName();
+      const amountStr = String(f.get('amount')).trim();
+      if (amountStr !== '') {
+        cur.amount = Math.max(0, parseFloat(amountStr) || 0);
+        cur.paid = f.get('paid') === '1';
+      }
       const note = f.get('note').trim();
       if (note) cur.note = (cur.note ? cur.note + ' | ' : '') + 'Возврат: ' + note;
       const cond = f.get('condition');
       const newStatus = cond === 'ok' ? 'available' : cond;
       store.update(t.id, { status: newStatus, rentals: t.rentals });
       modal.close(); toast('Возврат принят'); router();
+    });
+  }
+
+  function openExtendForm(t) {
+    const cur = currentRental(t);
+    if (!cur) { toast('Активная аренда не найдена', 'err'); return; }
+    modal.open(`
+      <h2>Продлить аренду</h2>
+      <p class="tool-card__cat" style="margin-top:-10px">${esc(t.name)} · ${esc(cur.renter)}</p>
+      <form id="extForm">
+        ${field('Вернуть до (новая дата)', `<input name="dueAt" type="date" required value="${cur.dueAt || todayInput()}">`,
+          cur.dueAt ? 'Сейчас: до ' + fmtDate(cur.dueAt) : '')}
+        <button class="btn btn--primary btn--block" type="submit">${icon('alarm')} Продлить</button>
+      </form>
+    `);
+    $('#extForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const dueAt = new FormData(e.target).get('dueAt');
+      if (!dueAt) return;
+      cur.extensions = cur.extensions || [];
+      cur.extensions.push({ from: cur.dueAt || '', to: dueAt, at: nowISO(), by: managerName() });
+      cur.dueAt = dueAt;
+      store.update(t.id, { rentals: t.rentals });
+      modal.close(); toast('Аренда продлена до ' + fmtDate(dueAt)); router();
     });
   }
 

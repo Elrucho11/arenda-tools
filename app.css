@@ -237,6 +237,7 @@ body { background: var(--gray-light); padding-bottom: 90px; }
 .stat--over .stat__num { color: #dc2626; }
 .stat--over { border-color: #f3c2c2; background: #fff5f5; }
 .tool-card--over { border-color: #f3c2c2; }
+.maint-due { color: #dc2626; font-weight: 800; }
 .tool-card__renter.is-over { color: #dc2626; font-weight: 700; }
 .overdue-banner { background: #fde8e8; color: #dc2626; font-weight: 700; padding: 10px 14px; border-radius: var(--radius-sm); margin-bottom: 12px; font-size: .92rem; }
 
