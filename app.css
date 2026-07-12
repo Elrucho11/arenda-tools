@@ -261,3 +261,6 @@ body { background: var(--gray-light); padding-bottom: 90px; }
   .app-header, .fab, .actions-row, .app-nav, .back-link, .head-actions { display: none !important; }
   body { background: #fff; }
 }
+
+/* Вкладки Вход/Регистрация на экране авторизации */
+.auth-tabs { display: flex; gap: 8px; margin-top: 10px; }

@@ -280,7 +280,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Распознавание доступно только вошедшим сотрудникам
+    // Распознавание доступно только ОДОБРЕННЫМ сотрудникам (есть профиль):
+    // зарегистрировавшийся, но не принятый администратором, доступа не имеет
     const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
     if (!token) {
       return new Response(JSON.stringify({ error: "Требуется вход" }), { status: 401, headers: cors });
@@ -293,6 +294,22 @@ Deno.serve(async (req) => {
     });
     if (!uResp.ok) {
       return new Response(JSON.stringify({ error: "Требуется вход" }), { status: 401, headers: cors });
+    }
+    const user = await uResp.json().catch(() => null);
+    const profResp = await fetch(
+      `${Deno.env.get("SUPABASE_URL")}/rest/v1/profiles?id=eq.${user?.id}&select=id`,
+      {
+        headers: {
+          "apikey": Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+          "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""}`,
+        },
+      },
+    );
+    const profs = profResp.ok ? await profResp.json().catch(() => []) : [];
+    if (!Array.isArray(profs) || profs.length === 0) {
+      return new Response(JSON.stringify({ error: "Аккаунт ожидает одобрения администратора" }), {
+        status: 403, headers: cors,
+      });
     }
 
     const apiKey = Deno.env.get("YANDEX_API_KEY");

@@ -111,6 +111,43 @@ Deno.serve(async (req) => {
       return json({ users: data });
     }
 
+    // Заявки на регистрацию: аккаунты без профиля (сам зарегистрировался, ждёт одобрения)
+    if (action === "list_pending") {
+      const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
+      if (error) throw new Error(error.message);
+      const { data: profs } = await admin.from("profiles").select("id");
+      const known = new Set((profs || []).map((p) => p.id));
+      const pending = data.users
+        .filter((u) => !known.has(u.id))
+        .map((u) => ({
+          id: u.id,
+          email: u.email,
+          name: (u.user_metadata && u.user_metadata.name) || "",
+          created_at: u.created_at,
+        }));
+      return json({ pending });
+    }
+
+    if (action === "approve") {
+      const { data: u, error } = await admin.auth.admin.getUserById(body.id);
+      if (error || !u.user) return json({ error: "Заявка не найдена" }, 404);
+      const role = body.role === "admin" ? "admin" : "manager";
+      const name = ((u.user.user_metadata && u.user.user_metadata.name) || u.user.email || "Сотрудник").trim();
+      const { error: pe } = await admin.from("profiles").insert({
+        id: u.user.id, email: u.user.email, name, role,
+      });
+      if (pe) throw new Error(pe.message);
+      return json({ ok: true });
+    }
+
+    if (action === "reject") {
+      const { data: prof } = await admin.from("profiles").select("id").eq("id", body.id).single();
+      if (prof) return json({ error: "Это уже одобренный сотрудник — используйте удаление" }, 400);
+      const { error } = await admin.auth.admin.deleteUser(body.id);
+      if (error) throw new Error(error.message);
+      return json({ ok: true });
+    }
+
     if (action === "create") {
       const acc = await createAccount(body.email, body.password, body.name, body.role);
       return json({ ok: true, account: acc });

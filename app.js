@@ -189,44 +189,113 @@
       : 'Вход';
   }
 
-  // Экран входа / первичной настройки (рисуется вместо приложения)
+  // Экран входа / регистрации / первичной настройки (рисуется вместо приложения)
   function renderAuthScreen(needsBootstrap) {
+    const view = document.getElementById('view');
+    if (needsBootstrap) {
+      view.innerHTML = `
+        <div class="auth-wrap">
+          <div class="panel auth-panel">
+            <span class="eyebrow">Первичная настройка</span>
+            <h2 style="margin:8px 0 4px">Создайте аккаунт <span style="color:var(--orange)">администратора</span></h2>
+            <p class="tool-card__cat" style="margin:0 0 16px">Это первый запуск: аккаунт станет администратором. Сотрудники потом зарегистрируются сами, а вы их одобрите.</p>
+            <form id="authForm">
+              ${field('Ваше имя *', `<input name="aname" required placeholder="Павел">`)}
+              ${field('Почта (логин) *', `<input name="aemail" type="email" required placeholder="pavel@arenda.ru" autocomplete="username">`)}
+              ${field('Пароль *', `<input name="apass" type="password" required minlength="6" placeholder="Минимум 6 символов" autocomplete="new-password">`)}
+              <button class="btn btn--primary btn--block" type="submit">Создать и войти</button>
+            </form>
+          </div>
+        </div>`;
+      $('#authForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = new FormData(e.target);
+        const btn = e.target.querySelector('button[type=submit]');
+        btn.disabled = true; btn.textContent = 'Секунду…';
+        try {
+          await adminApi({ action: 'bootstrap', email: f.get('aemail').trim(), password: f.get('apass'), name: f.get('aname').trim() });
+          const { error } = await sync.client.auth.signInWithPassword({ email: f.get('aemail').trim(), password: f.get('apass') });
+          if (error) throw new Error(error.message);
+          location.reload();
+        } catch (err) {
+          toast(err.message, 'err');
+          btn.disabled = false; btn.textContent = 'Создать и войти';
+        }
+      });
+      return;
+    }
+
+    let mode = 'login'; // login | signup
+    const draw = () => {
+      view.innerHTML = `
+        <div class="auth-wrap">
+          <div class="panel auth-panel">
+            <span class="eyebrow">Для сотрудников</span>
+            <div class="auth-tabs">
+              <button class="chip ${mode === 'login' ? 'is-active' : ''}" data-mode="login">Вход</button>
+              <button class="chip ${mode === 'signup' ? 'is-active' : ''}" data-mode="signup">Регистрация</button>
+            </div>
+            <p class="tool-card__cat" style="margin:10px 0 16px">${mode === 'login'
+              ? 'Войдите со своим логином и паролем.'
+              : 'После регистрации доступ откроется, когда администратор одобрит заявку.'}</p>
+            <form id="authForm">
+              ${mode === 'signup' ? field('Ваше имя *', `<input name="aname" required placeholder="Александр">`) : ''}
+              ${field('Почта (логин) *', `<input name="aemail" type="email" required placeholder="sasha@arenda.ru" autocomplete="username">`)}
+              ${field('Пароль *', `<input name="apass" type="password" required minlength="6" placeholder="Минимум 6 символов" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}">`)}
+              <button class="btn btn--primary btn--block" type="submit">${mode === 'login' ? 'Войти' : 'Зарегистрироваться'}</button>
+            </form>
+          </div>
+        </div>`;
+      view.querySelector('.auth-tabs').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-mode]');
+        if (b) { mode = b.dataset.mode; draw(); }
+      });
+      $('#authForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = new FormData(e.target);
+        const email = f.get('aemail').trim();
+        const password = f.get('apass');
+        const btn = e.target.querySelector('button[type=submit]');
+        btn.disabled = true; btn.textContent = 'Секунду…';
+        try {
+          if (mode === 'signup') {
+            const { error } = await sync.client.auth.signUp({
+              email, password,
+              options: { data: { name: f.get('aname').trim() } },
+            });
+            if (error) throw new Error(error.message);
+          } else {
+            const { error } = await sync.client.auth.signInWithPassword({ email, password });
+            if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Неверная почта или пароль' : error.message);
+          }
+          location.reload();
+        } catch (err) {
+          toast(err.message, 'err');
+          btn.disabled = false; btn.textContent = mode === 'login' ? 'Войти' : 'Зарегистрироваться';
+        }
+      });
+    };
+    draw();
+  }
+
+  // Аккаунт есть, но администратор ещё не одобрил — доступа нет
+  function renderPendingScreen(email) {
     const view = document.getElementById('view');
     view.innerHTML = `
       <div class="auth-wrap">
-        <div class="panel auth-panel">
-          <span class="eyebrow">${needsBootstrap ? 'Первичная настройка' : 'Вход для сотрудников'}</span>
-          <h2 style="margin:8px 0 4px">${needsBootstrap ? 'Создайте аккаунт <span style="color:var(--orange)">администратора</span>' : 'Войдите в <span style="color:var(--orange)">приложение</span>'}</h2>
-          <p class="tool-card__cat" style="margin:0 0 16px">${needsBootstrap
-            ? 'Это первый запуск: аккаунт станет администратором. Менеджеров вы добавите потом в своём профиле.'
-            : 'Аккаунт выдаёт администратор. Нет аккаунта — обратитесь к нему.'}</p>
-          <form id="authForm">
-            ${needsBootstrap ? field('Ваше имя *', `<input name="aname" required placeholder="Павел">`) : ''}
-            ${field('Почта (логин) *', `<input name="aemail" type="email" required placeholder="pavel@arenda.ru" autocomplete="username">`)}
-            ${field('Пароль *', `<input name="apass" type="password" required minlength="6" placeholder="Минимум 6 символов" autocomplete="current-password">`)}
-            <button class="btn btn--primary btn--block" type="submit">${needsBootstrap ? 'Создать и войти' : 'Войти'}</button>
-          </form>
+        <div class="panel auth-panel" style="text-align:center">
+          <span class="eyebrow">Заявка отправлена</span>
+          <h2 style="margin:8px 0 4px">Ожидает <span style="color:var(--orange)">одобрения</span></h2>
+          <p class="tool-card__cat" style="margin:0 0 16px">Аккаунт ${esc(email || '')} создан. Доступ откроется, когда администратор примет заявку в разделе «Сотрудники». Сообщите ему.</p>
+          <button class="btn btn--primary btn--block" id="pendingRefresh">Проверить ещё раз</button>
+          <button class="btn btn--outline btn--sm btn--block" id="pendingLogout" style="margin-top:10px">Выйти</button>
         </div>
-      </div>
-    `;
-    $('#authForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const f = new FormData(e.target);
-      const email = f.get('aemail').trim();
-      const password = f.get('apass');
-      const btn = e.target.querySelector('button[type=submit]');
-      btn.disabled = true; btn.textContent = 'Секунду…';
-      try {
-        if (needsBootstrap) {
-          await adminApi({ action: 'bootstrap', email, password, name: f.get('aname').trim() });
-        }
-        const { error } = await sync.client.auth.signInWithPassword({ email, password });
-        if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Неверная почта или пароль' : error.message);
-        location.reload();
-      } catch (err) {
-        toast(err.message, 'err');
-        btn.disabled = false; btn.textContent = needsBootstrap ? 'Создать и войти' : 'Войти';
-      }
+      </div>`;
+    $('#pendingRefresh').addEventListener('click', () => location.reload());
+    $('#pendingLogout').addEventListener('click', async () => {
+      try { await sync.client.auth.signOut(); } catch {}
+      localStorage.removeItem(PROFILE_KEY);
+      location.reload();
     });
   }
 
@@ -1258,7 +1327,9 @@
       <button class="btn btn--outline btn--sm btn--block" id="logoutBtn" style="margin-top:10px">Выйти из аккаунта</button>
       ${admin ? `
       <div class="role-box">
-        <div class="role-box__row"><b>Сотрудники</b></div>
+        <div class="role-box__row"><b>Заявки на регистрацию</b></div>
+        <div id="pendingList" class="staff-list"><p class="tool-card__cat">Загружаю…</p></div>
+        <div class="role-box__row" style="margin-top:14px"><b>Сотрудники</b></div>
         <div id="staffList" class="staff-list"><p class="tool-card__cat">Загружаю…</p></div>
         <form id="staffAdd" style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
           <div class="role-box__row"><b>Новый сотрудник</b></div>
@@ -1289,7 +1360,48 @@
       localStorage.removeItem(PROFILE_KEY);
       location.reload();
     });
-    if (admin) loadStaffList();
+    if (admin) { loadPendingList(); loadStaffList(); }
+  }
+
+  async function loadPendingList() {
+    const box = $('#pendingList');
+    if (!box) return;
+    try {
+      const { pending } = await adminApi({ action: 'list_pending' });
+      if (!pending.length) {
+        box.innerHTML = '<p class="tool-card__cat">Новых заявок нет.</p>';
+        return;
+      }
+      box.innerHTML = pending.map(u => `
+        <div class="staff-row" data-id="${u.id}">
+          <div class="staff-row__info">
+            <b>${esc(u.name || 'Без имени')}</b>
+            <span>${esc(u.email)}</span>
+          </div>
+          <div class="staff-row__actions">
+            <button class="btn btn--primary btn--sm" data-act="approve">Принять</button>
+            <button class="btn btn--outline btn--sm" data-act="reject" style="color:#dc2626;border-color:#f3c2c2">Отклонить</button>
+          </div>
+        </div>`).join('');
+      box.onclick = async (e) => {
+        const btn = e.target.closest('[data-act]'); if (!btn) return;
+        const id = btn.closest('.staff-row').dataset.id;
+        const u = pending.find(x => x.id === id); if (!u) return;
+        try {
+          if (btn.dataset.act === 'approve') {
+            await adminApi({ action: 'approve', id, role: 'manager' });
+            toast('Принят как менеджер: ' + (u.name || u.email));
+          } else {
+            if (!confirm('Отклонить и удалить заявку «' + (u.name || u.email) + '»?')) return;
+            await adminApi({ action: 'reject', id });
+            toast('Заявка отклонена');
+          }
+          loadPendingList(); loadStaffList();
+        } catch (err) { toast(err.message, 'err'); }
+      };
+    } catch (err) {
+      box.innerHTML = `<p class="tool-card__cat">Не удалось загрузить: ${esc(err.message)}</p>`;
+    }
   }
 
   async function loadStaffList() {
@@ -1943,10 +2055,9 @@
     });
     await loadProfile(session.user.id);
     if (!currentProfile) {
-      // аккаунт без профиля (удалён администратором) — выходим
-      try { await sync.client.auth.signOut(); } catch {}
-      localStorage.removeItem(PROFILE_KEY);
-      renderAuthScreen(false);
+      // аккаунт без профиля: либо заявка ещё не одобрена, либо аккаунт удалён
+      setStatus('local');
+      renderPendingScreen(session.user.email);
       return;
     }
     updateUserBtn();
