@@ -34,7 +34,16 @@
       catch { this.data = { tools: [] }; }
       if (!Array.isArray(this.data.tools)) this.data.tools = [];
     },
-    save() { localStorage.setItem(KEY, JSON.stringify(this.data)); },
+    // Кэш НЕ должен ронять приложение: при переполнении localStorage (много фото)
+    // сохраняем копию без фотографий, а фото живут в памяти и в облаке.
+    save() {
+      try { localStorage.setItem(KEY, JSON.stringify(this.data)); return; }
+      catch (e) { /* переполнение — пробуем облегчённую копию */ }
+      try {
+        const light = { ...this.data, tools: this.data.tools.map(t => t.photo ? { ...t, photo: '' } : t) };
+        localStorage.setItem(KEY, JSON.stringify(light));
+      } catch (e) { console.warn('Кэш не сохранён (нет места):', e); }
+    },
     // Служебные документы (например «_settings» с PIN администратора) живут
     // в той же таблице, но в каталоге не показываются
     tools() { return this.data.tools.filter(t => t.id !== '_settings'); },
